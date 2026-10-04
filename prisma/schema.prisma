@@ -1,0 +1,111 @@
+generator client {
+ provider = "prisma-client-js"
+}
+datasource db {
+ provider = "postgresql"
+ url = env("DATABASE_URL")
+}
+model User {
+ id String @id @default(cuid())
+ email String @unique
+ password String
+ role String @default("USER")
+ wallet Int @default(0)
+ disabled Boolean @default(false)
+ createdAt DateTime @default(now())
+ sessions Session[]
+ instances Instance[]
+ payments Payment[]
+ ledger Ledger[]
+}
+model Session {
+ id String @id
+ userId String
+ user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+ expiresAt DateTime
+ @@index([expiresAt])
+}
+model Plan {
+ id String @id @default(cuid())
+ name String
+ region String
+ location String
+ os String
+ cpu Int
+ ram Int
+ disk Int
+ baseCents Int
+ stock Int
+ enabled Boolean @default(true)
+ instances Instance[]
+}
+model Instance {
+ id String @id @default(cuid())
+ userId String
+ user User @relation(fields:[userId],references:[id])
+ planId String
+ plan Plan @relation(fields:[planId],references:[id])
+ cpu Int
+ ram Int
+ disk Int
+ priceCents Int
+ status String @default("PROVISIONING")
+ requestKey String
+ ip String?
+ username String?
+ secret String?
+ providerId String?
+ uptimeSeconds Int @default(0)
+ bandwidthBytes BigInt @default(0)
+ createdAt DateTime @default(now())
+ expiresAt DateTime
+ jobs Job[]
+ @@unique([userId,requestKey])
+ @@index([status,expiresAt])
+}
+model Ledger {
+ id String @id @default(cuid())
+ userId String
+ user User @relation(fields:[userId],references:[id])
+ amount Int
+ kind String
+ reference String @unique
+ createdAt DateTime @default(now())
+}
+model Payment {
+ id String @id @default(cuid())
+ userId String
+ user User @relation(fields:[userId],references:[id])
+ cents Int
+ provider String
+ providerId String? @unique
+ status String @default("PENDING")
+ requestKey String
+ createdAt DateTime @default(now())
+ @@unique([userId,requestKey])
+}
+model Job {
+ id String @id @default(cuid())
+ instanceId String
+ instance Instance @relation(fields:[instanceId],references:[id])
+ action String
+ state String @default("PENDING")
+ attempts Int @default(0)
+ runAt DateTime @default(now())
+ lockedUntil DateTime?
+ error String?
+ createdAt DateTime @default(now())
+ @@index([state,runAt])
+}
+model RateLimit {
+ key String @id
+ count Int
+ expiresAt DateTime
+}
+model Audit {
+ id String @id @default(cuid())
+ actorId String
+ action String
+ targetId String
+ createdAt DateTime @default(now())
+}
