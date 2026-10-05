@@ -10,7 +10,7 @@ export default async function Admin() {
     throw e;
   }
   return (
-    <main className="max-w-7xl mx-auto p-5 md:py-10">
+    <main className="page-shell">
       <AdminPanel />
     </main>
   );

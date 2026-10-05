@@ -21,7 +21,7 @@ export default function Dashboard() {
   );
   return (
     <>
-      <h1 className="text-3xl mb-3">Your workspace</h1>
+      <h1 className="text-4xl md:text-5xl mb-4">Your workspace</h1>
       <p className="muted mb-8">
         Welcome{me?.name ? `, ${me.name}` : ""}. Your account and compute at a
         glance.
@@ -37,9 +37,9 @@ export default function Dashboard() {
               : "No active plan",
           ],
         ].map(([k, v]) => (
-          <div className="panel p-6" key={k}>
+          <div className="panel p-7" key={k}>
             <p className="muted text-sm">{k}</p>
-            <p className="text-2xl mt-4">{v}</p>
+            <p className="text-3xl mt-5 tracking-tight">{v}</p>
           </div>
         ))}
       </div>

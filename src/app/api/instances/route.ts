@@ -13,6 +13,11 @@ export const GET = route(async () => {
   return json(
     rows.map(({ secret, ...r }) => ({
       ...r,
+      plan: {
+        ...r.plan,
+        os: r.os ?? r.plan.os,
+        location: r.location ?? r.plan.location,
+      },
       bandwidthBytes: r.bandwidthBytes.toString(),
     })),
   );

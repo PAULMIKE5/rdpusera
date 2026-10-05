@@ -59,3 +59,16 @@ test("monetary checks preserve cents and reject crypto underpayment", () => {
   assert.ok(!fullyPaid("0", "0"));
   assert.ok(!fullyPaid("not money", "1"));
 });
+
+import { dollarsToCents, paymentCents } from "../src/lib/money";
+test("decimal payments preserve ten-cent minimum precision", () => {
+  assert.equal(dollarsToCents("0.10"), 10);
+  assert.ok(paymentCents.safeParse(10).success);
+  assert.ok(!paymentCents.safeParse(9).success);
+  assert.ok(!paymentCents.safeParse(10.5).success);
+  assert.equal(dollarsToCents("0.29"), 29);
+  assert.equal(dollarsToCents("1.01"), 101);
+  assert.throws(() => dollarsToCents("0.101"));
+  assert.throws(() => dollarsToCents("-0.10"));
+  assert.throws(() => dollarsToCents("NaN"));
+});

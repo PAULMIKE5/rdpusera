@@ -4,18 +4,13 @@ import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { auth, issue, origin, limit, HttpError } from "@/lib/security";
 import { route, body, json } from "@/lib/http";
-const credentials = z.object({
-  email: z
-    .string()
-    .email()
-    .max(254)
-    .transform((v) => v.toLowerCase()),
-  password: z
-    .string()
-    .min(12)
-    .max(72)
-    .refine((v) => Buffer.byteLength(v) <= 72),
-});
+import {
+  credentials,
+  registerAccount,
+  verifyEmail,
+  resendVerification,
+  resumeVerification,
+} from "@/lib/registration";
 export const POST = route(async (req) => {
   origin(req);
   const action = new URL(req.url).pathname.split("/").pop();
@@ -25,28 +20,34 @@ export const POST = route(async (req) => {
     (await cookies()).delete("session");
     return json({ ok: true });
   }
-  if (action !== "login" && action !== "register")
+  if (!["login", "register", "verify", "resend"].includes(action ?? ""))
     throw new HttpError(404, "Not found");
   await limit("auth:global", 300);
-  const data = credentials.parse(await body(req));
-  await limit(`auth:${data.email}`, 8, 900);
-  let user = await db.user.findUnique({ where: { email: data.email } });
-  if (action === "register") {
-    if (user) throw new HttpError(409, "Unable to create this account");
-    user = await db.user.create({
-      data: {
-        email: data.email,
-        password: await bcrypt.hash(data.password, 12),
-      },
-    });
-  } else {
-    const hash =
-      user?.password ??
-      "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7dkjM8P7M4uGUzLCaKbAKLBbOZSHM7a";
-    const valid = await bcrypt.compare(data.password, hash);
-    if (!valid || !user || user.disabled)
-      throw new HttpError(401, "Invalid credentials");
+  const input = await body(req);
+  if (action === "verify") {
+    const userId = await verifyEmail(input);
+    await issue(userId);
+    return json({ ok: true });
   }
-  await issue(user!.id);
+  if (action === "resend") {
+    const s = z
+      .object({ challengeId: z.string().regex(/^[a-f0-9]{64}$/) })
+      .parse(input);
+    return json(await resendVerification(s.challengeId));
+  }
+  const data = credentials.parse(input);
+  await limit(`auth:${data.email}`, 8, 900);
+  if (action === "register") return json(await registerAccount(data), 202);
+  const user = await db.user.findUnique({ where: { email: data.email } });
+  const valid = await bcrypt.compare(
+    data.password,
+    user?.password ??
+      "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7dkjM8P7M4uGUzLCaKbAKLBbOZSHM7a",
+  );
+  if (!valid || !user || user.disabled || user.deletedAt)
+    throw new HttpError(401, "Invalid credentials");
+  if (user.emailVerificationRequired && !user.emailVerifiedAt)
+    return json(await resumeVerification(user.email), 202);
+  await issue(user.id);
   return json({ ok: true });
 });

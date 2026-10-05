@@ -1,10 +1,19 @@
 import { z } from "zod";
+import { countries, checkoutSystems } from "./countries";
+export const countryInput = z
+  .string()
+  .refine(
+    (v) => countries.some((c) => c.code === v),
+    "Select a country from the list",
+  );
 import { createHash } from "node:crypto";
 export const cartLine = z.object({
   planId: z.string().min(1).max(100),
-  cpu: z.number().int().min(1).max(32),
-  ram: z.number().int().min(1).max(128),
-  disk: z.number().int().min(20).max(2000),
+  cpu: z.number().int().min(1).max(32).optional(),
+  ram: z.number().int().min(1).max(128).optional(),
+  disk: z.number().int().min(20).max(2000).optional(),
+  countryCode: countryInput,
+  os: z.enum(checkoutSystems),
   quantity: z.number().int().min(1).max(10),
 });
 export const checkoutInput = z
@@ -25,6 +34,8 @@ export function fingerprint(s: z.infer<typeof checkoutInput>) {
       ram: l.ram,
       disk: l.disk,
       quantity: l.quantity,
+      countryCode: l.countryCode,
+      os: l.os,
     }))
     .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   return createHash("sha256")

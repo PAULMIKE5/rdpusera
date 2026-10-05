@@ -1,7 +1,13 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { api, useWorkspace } from "./workspace";
-import { countries, operatingSystems, planDescription } from "@/lib/countries";
+import {
+  checkoutSystems,
+  countries,
+  operatingSystems,
+  planDescription,
+} from "@/lib/countries";
+import { dollarsToCents } from "@/lib/money";
 import { money } from "@/lib/domain";
 import type { Plan, Order, Instance, Method } from "./types";
 type Location = { id: string; name: string; region: string; enabled: boolean };
@@ -9,6 +15,8 @@ type Inventory = {
   id: string;
   planId: string;
   label: string;
+  countryCode: string | null;
+  os: string | null;
   ip: string;
   port: number;
   state: string;
@@ -22,6 +30,8 @@ type AdminData = {
     name: string;
     role: string;
     disabled: boolean;
+    emailVerificationRequired: boolean;
+    emailVerifiedAt: string | null;
     wallet: number;
   }[];
   plans: Plan[];
@@ -226,7 +236,7 @@ export function AdminPanel() {
         type: "number",
         value: (p?.baseCents ?? 2400) / 100,
         step: 0.01,
-        min: 1,
+        min: 0.1,
         max: 1000,
       },
       {
@@ -411,8 +421,8 @@ export function AdminPanel() {
                     className="mt-5 border-t border-slate-700 pt-4"
                   >
                     <p>
-                      {i.name} · {i.location} · {i.cpu} vCPU / {i.ram} GB /{" "}
-                      {i.disk} GB
+                      {i.name} · {i.location} · {i.os} · {i.cpu} vCPU / {i.ram}{" "}
+                      GB / {i.disk} GB
                     </p>
                     {o.status === "PENDING" &&
                     i.instance?.status === "PENDING" ? (
@@ -438,7 +448,9 @@ export function AdminPanel() {
                                 .filter(
                                   (s) =>
                                     s.state === "AVAILABLE" &&
-                                    s.planId === i.instance?.planId,
+                                    s.planId === i.instance?.planId &&
+                                    s.countryCode === i.countryCode &&
+                                    s.os === i.os,
                                 )
                                 .map((s) => ({
                                   value: s.id,
@@ -483,7 +495,7 @@ export function AdminPanel() {
                     action: "plan",
                     data: {
                       ...v,
-                      baseCents: Math.round(Number(v.price) * 100),
+                      baseCents: dollarsToCents(String(v.price)),
                     },
                   })
                 }
@@ -500,7 +512,7 @@ export function AdminPanel() {
                         id: p.id,
                         locationId: p.locationId,
                         ...v,
-                        baseCents: Math.round(Number(v.price) * 100),
+                        baseCents: dollarsToCents(String(v.price)),
                       },
                     })
                   }
@@ -585,7 +597,11 @@ export function AdminPanel() {
                     {u.email}
                     <p className="muted text-sm">
                       {u.role} · {money(u.wallet)} ·{" "}
-                      {u.disabled ? "Disabled" : "Enabled"}
+                      {u.disabled
+                        ? "Disabled"
+                        : u.emailVerificationRequired && !u.emailVerifiedAt
+                          ? "Email verification pending"
+                          : "Enabled"}
                     </p>
                   </div>
                   {u.role !== "ADMIN" && (
@@ -695,14 +711,31 @@ export function AdminPanel() {
             <p className="muted mb-5">
               Paid orders automatically receive a matching ready server. Adding
               a server does not change plan stock: set saleable capacity in
-              Plans. Inventory servers match the plan's base specs; customized
-              orders require manually verified access details.
+              Plans. Inventory servers must match the plan’s hardware and the
+              country and OS selected by the customer.
             </p>
             <Editor
               title="Add ready server"
               fields={[
                 { name: "planId", label: "Plan", options: planOptions },
                 { name: "label", label: "Internal server label" },
+                {
+                  name: "countryCode",
+                  label: "Actual server country",
+                  options: countries.map((c) => ({
+                    value: c.code,
+                    label: c.name,
+                  })),
+                },
+                {
+                  name: "os",
+                  label: "Actual operating system",
+                  value: "Windows",
+                  options: checkoutSystems.map((os) => ({
+                    value: os,
+                    label: os,
+                  })),
+                },
                 ...connectionFields(),
               ]}
               label="Save encrypted server details"

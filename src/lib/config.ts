@@ -1,6 +1,7 @@
 import { db } from "./db";
 import { decrypt, required, HttpError } from "./security";
 export const editableKeys = [
+  "RESEND_API_KEY",
   "FLUTTERWAVE_SECRET_KEY",
   "FLUTTERWAVE_WEBHOOK_SECRET",
   "NOWPAYMENTS_API_KEY",

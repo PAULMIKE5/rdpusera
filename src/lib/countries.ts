@@ -511,3 +511,12 @@ export const operatingSystems = [
 ] as const;
 export const planDescription =
   "Residential IP addresses suitable for remote jobs, bot work, and trading.";
+
+export const checkoutSystems = ["Windows", "Ubuntu", "Linux"] as const;
+export function osFamily(os: string) {
+  return os.startsWith("Windows")
+    ? "Windows"
+    : os.startsWith("Ubuntu")
+      ? "Ubuntu"
+      : "Linux";
+}

@@ -1,12 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
 import { api, useWorkspace } from "@/components/workspace";
+import { dollarsToCents } from "@/lib/money";
 import { money } from "@/lib/domain";
 import type { Method } from "@/components/types";
 export default function Billing() {
   const { me, refresh, setNotice } = useWorkspace(),
     [methods, setMethods] = useState<Method[]>([]),
-    [cents, setCents] = useState(5000),
+    [amount, setAmount] = useState("50.00"),
     [provider, setProvider] = useState(""),
     [key, setKey] = useState(""),
     [busy, setBusy] = useState(false);
@@ -19,7 +20,7 @@ export default function Billing() {
       })
       .catch((e) => setNotice(e.message));
   }, [setNotice]);
-  useEffect(() => setKey(crypto.randomUUID()), [cents, provider]);
+  useEffect(() => setKey(crypto.randomUUID()), [amount, provider]);
   return (
     <>
       <h1 className="text-3xl mb-6">Wallet & billing</h1>
@@ -30,7 +31,7 @@ export default function Billing() {
           setBusy(true);
           try {
             const r = await api("funding", {
-              cents,
+              cents: dollarsToCents(amount),
               provider,
               requestKey: key,
             });
@@ -50,14 +51,14 @@ export default function Billing() {
         <p className="muted">Current balance</p>
         <p className="text-3xl">{money(me?.wallet ?? 0)}</p>
         <label>
-          Amount in USD
+          Amount in USD (minimum $0.10)
           <input
             type="number"
-            min="5"
+            min="0.10"
             max="1000"
-            step="1"
-            value={cents / 100}
-            onChange={(e) => setCents(Math.round(Number(e.target.value) * 100))}
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
           />
         </label>
         <label>
@@ -75,7 +76,7 @@ export default function Billing() {
             {me?.demo && <option value="demo">Demo credit (local only)</option>}
           </select>
         </label>
-        <button className="primary" disabled={busy || !provider}>
+        <button className="primary" disabled={busy || !provider || !key}>
           Add funds
         </button>
         {!methods.length && !me?.demo && (

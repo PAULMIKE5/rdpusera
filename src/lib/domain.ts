@@ -1,6 +1,9 @@
 import { z } from "zod";
+import { checkoutSystems, countries } from "./countries";
 export const specs = z.object({
   planId: z.string().min(1).max(100),
+  countryCode: z.string().refine((v) => countries.some((c) => c.code === v)),
+  os: z.enum(checkoutSystems),
   cpu: z.number().int().min(1).max(32),
   ram: z.number().int().min(1).max(128),
   disk: z.number().int().min(20).max(2000),

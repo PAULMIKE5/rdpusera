@@ -1,3 +1,4 @@
+import { paymentCents } from "@/lib/money";
 import { z } from "zod";
 import { auth, origin, limit, HttpError, demo } from "@/lib/security";
 import { route, json, body } from "@/lib/http";
@@ -10,7 +11,7 @@ export const POST = route(async (req) => {
   await limit(`fund:${user.id}`, 10);
   const s = z
     .object({
-      cents: z.number().int().min(500).max(100000),
+      cents: paymentCents,
       provider: z.enum(["flutterwave", "nowpayments", "demo"]),
       requestKey: z.string().uuid(),
     })

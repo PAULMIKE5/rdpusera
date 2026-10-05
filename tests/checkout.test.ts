@@ -5,7 +5,15 @@ import {
   fingerprint,
   deliveryInput,
 } from "../src/lib/checkout-domain";
-const line = { planId: "test", cpu: 2, ram: 4, disk: 80, quantity: 1 };
+const line = {
+  countryCode: "US",
+  os: "Windows" as const,
+  planId: "test",
+  cpu: 2,
+  ram: 4,
+  disk: 80,
+  quantity: 1,
+};
 test("cart validates quantities and total units", () => {
   const s = {
     requestKey: crypto.randomUUID(),
@@ -76,5 +84,29 @@ test("delivery accepts validated connection or an inventory assignment", () => {
       password: "secret",
     }).success,
     false,
+  );
+});
+
+test("configuration is required and participates in checkout idempotency", () => {
+  const s = {
+    requestKey: crypto.randomUUID(),
+    method: "wallet",
+    lines: [line],
+  };
+  assert.ok(
+    !checkoutInput.safeParse({ ...s, lines: [{ ...line, countryCode: "" }] })
+      .success,
+  );
+  assert.ok(
+    !checkoutInput.safeParse({ ...s, lines: [{ ...line, os: "Unknown" }] })
+      .success,
+  );
+  assert.notEqual(
+    fingerprint(s),
+    fingerprint({ ...s, lines: [{ ...line, countryCode: "CA" }] }),
+  );
+  assert.notEqual(
+    fingerprint(s),
+    fingerprint({ ...s, lines: [{ ...line, os: "Ubuntu" }] }),
   );
 });

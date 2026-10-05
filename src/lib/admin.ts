@@ -41,6 +41,7 @@ export async function deleteAccount(actorId: string, userId: string) {
         "Settle wallet funds, payments, orders and server instances before deleting this account",
       );
     await tx.session.deleteMany({ where: { userId } });
+    await tx.emailVerification.deleteMany({ where: { userId } });
     await tx.user.update({
       where: { id: userId },
       data: {

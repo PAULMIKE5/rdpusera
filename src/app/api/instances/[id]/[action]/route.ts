@@ -60,7 +60,7 @@ export const GET = route(async (req) => {
     !i?.ip ||
     i.status !== "ACTIVE" ||
     i.expiresAt <= new Date() ||
-    !i.plan.os.startsWith("Windows")
+    !(i.os ?? i.plan.os).startsWith("Windows")
   )
     throw new HttpError(409, "RDP unavailable");
   const clean = (v: string) => v.replace(/[\r\n]/g, "");

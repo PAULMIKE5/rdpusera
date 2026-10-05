@@ -51,6 +51,7 @@ async function main() {
         email: email.toLowerCase(),
         password: await bcrypt.hash(password, 12),
         role: "ADMIN",
+        emailVerificationRequired: false,
       },
     });
   }

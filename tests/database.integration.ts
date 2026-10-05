@@ -1,5 +1,12 @@
 import "dotenv/config";
 import test from "node:test";
+import {
+  registerAccount,
+  verifyEmail,
+  resendVerification,
+  otpHash,
+} from "../src/lib/registration";
+import { issue } from "../src/lib/security";
 import { POST as webhook } from "../src/app/api/webhooks/[provider]/route";
 import { checkoutPayment } from "../src/lib/payments";
 import { nowSignature } from "../src/lib/gateway-security";
@@ -21,6 +28,7 @@ async function fixture(stock = 10, wallet = 10000) {
     data: {
       email: `${crypto.randomUUID()}@test.invalid`,
       password: "unused",
+      emailVerifiedAt: new Date(),
       wallet,
     },
   });
@@ -43,7 +51,17 @@ async function fixture(stock = 10, wallet = 10000) {
     cart: (method = "wallet", quantity = 1) => ({
       requestKey: crypto.randomUUID(),
       method,
-      lines: [{ planId: plan.id, cpu: 2, ram: 4, disk: 80, quantity }],
+      lines: [
+        {
+          planId: plan.id,
+          cpu: 2,
+          ram: 4,
+          disk: 80,
+          quantity,
+          countryCode: "US",
+          os: "Windows" as "Windows" | "Ubuntu" | "Linux",
+        },
+      ],
     }),
     async cleanup() {
       await db.audit.deleteMany({});
@@ -240,6 +258,8 @@ test("manual payment confirmation and ready inventory assignment are single use"
       data: {
         label: "ready",
         planId: f.plan.id,
+        countryCode: "US",
+        os: "Windows",
         ip: "192.0.2.5",
         port: 3389,
         username: "Administrator",
@@ -290,12 +310,14 @@ test("account deletion anonymizes profile and revokes sessions; admin deletion i
     await f.cleanup();
   }
 });
-test("paid orders autoassign ready inventory once; custom hardware stays pending", async () => {
+test("paid orders autoassign ready inventory once; hardware tampering is rejected", async () => {
   const f = await fixture();
   try {
     const server = await db.inventoryServer.create({
       data: {
         planId: f.plan.id,
+        countryCode: "US",
+        os: "Windows",
         label: "ready",
         ip: "192.0.2.99",
         port: 3389,
@@ -316,6 +338,8 @@ test("paid orders autoassign ready inventory once; custom hardware stays pending
     await db.inventoryServer.create({
       data: {
         planId: f.plan.id,
+        countryCode: "US",
+        os: "Windows",
         label: "base",
         ip: "192.0.2.98",
         username: "Administrator",
@@ -324,7 +348,7 @@ test("paid orders autoassign ready inventory once; custom hardware stays pending
     });
     const custom = f.cart();
     custom.lines[0].ram = 8;
-    assert.equal((await checkout(f.user.id, custom)).status, "PENDING");
+    await assert.rejects(checkout(f.user.id, custom), /hardware is fixed/);
     assert.equal(
       await db.inventoryServer.count({
         where: { planId: f.plan.id, state: "AVAILABLE" },
@@ -434,6 +458,170 @@ test("gateway checkout and verified callbacks settle once; invalid signatures an
       globalThis.fetch = originalFetch;
       await f.cleanup();
     }
+  }
+});
+test("country and OS selections persist and cannot receive mismatched inventory", async () => {
+  const f = await fixture();
+  try {
+    const server = await db.inventoryServer.create({
+      data: {
+        planId: f.plan.id,
+        countryCode: "US",
+        os: "Windows",
+        label: "us-windows",
+        ip: "192.0.2.81",
+        username: "Administrator",
+        secret: encrypt("password"),
+      },
+    });
+    const c = f.cart();
+    c.lines[0].countryCode = "CA";
+    c.lines[0].os = "Ubuntu";
+    const order = await checkout(f.user.id, c);
+    assert.equal(order.status, "PENDING");
+    const i = await db.instance.findFirstOrThrow({
+      where: { userId: f.user.id },
+    });
+    assert.equal(i.countryCode, "CA");
+    assert.equal(i.location, "Canada");
+    assert.equal(i.os, "Ubuntu");
+    await assert.rejects(
+      fulfill("admin", { id: i.id, inventoryId: server.id }),
+    );
+    assert.equal(
+      (await db.inventoryServer.findUniqueOrThrow({ where: { id: server.id } }))
+        .state,
+      "AVAILABLE",
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+test("registration requires email OTP, rejects guesses, limits resend, and consumes a code once", async () => {
+  const original = globalThis.fetch;
+  let emailedCode = "";
+  process.env.JWT_SECRET = "test-only-jwt-secret-with-at-least-32-characters";
+  process.env.RESEND_API_KEY = "test-only-key";
+  process.env.EMAIL_FROM = "hello@example.invalid";
+  const email = `${crypto.randomUUID()}@example.invalid`;
+  globalThis.fetch = async (_url, init) => {
+    const payload = JSON.parse(String(init?.body));
+    emailedCode = payload.text.match(/code is (\d{6})/)[1];
+    return Response.json({ id: "test-email" });
+  };
+  try {
+    const c = await registerAccount({
+      email,
+      password: "a-password-long-enough",
+    });
+    const u = await db.user.findUniqueOrThrow({ where: { email } });
+    assert.equal(u.emailVerifiedAt, null);
+    assert.equal(u.emailVerificationRequired, true);
+    assert.equal(await db.session.count({ where: { userId: u.id } }), 0);
+    await assert.rejects(issue(u.id), /Verify your email/);
+    const record = await db.emailVerification.findUniqueOrThrow({
+      where: { id: c.challengeId },
+    });
+    assert.notEqual(record.codeHash, emailedCode);
+    assert.equal(record.codeHash, otpHash(c.challengeId, emailedCode));
+    await assert.rejects(
+      resendVerification(c.challengeId),
+      /Too many requests/,
+    );
+    const wrong = emailedCode === "000000" ? "111111" : "000000";
+    await assert.rejects(
+      verifyEmail({ challengeId: c.challengeId, code: wrong }),
+    );
+    assert.equal(
+      (
+        await db.emailVerification.findUniqueOrThrow({
+          where: { id: c.challengeId },
+        })
+      ).attempts,
+      1,
+    );
+    assert.equal(
+      await verifyEmail({ challengeId: c.challengeId, code: emailedCode }),
+      u.id,
+    );
+    assert.ok(
+      (await db.user.findUniqueOrThrow({ where: { id: u.id } }))
+        .emailVerifiedAt,
+    );
+    await assert.rejects(
+      verifyEmail({ challengeId: c.challengeId, code: emailedCode }),
+    );
+  } finally {
+    globalThis.fetch = original;
+    await db.user.deleteMany({ where: { email } });
+  }
+});
+test("OTP attempt exhaustion, expiry and resend invalidate older codes", async () => {
+  const original = globalThis.fetch;
+  let code = "";
+  const email = `${crypto.randomUUID()}@example.invalid`;
+  globalThis.fetch = async (_url, init) => {
+    code = JSON.parse(String(init?.body)).text.match(/code is (\d{6})/)[1];
+    return Response.json({ id: "test-email" });
+  };
+  try {
+    const c = await registerAccount({
+      email,
+      password: "another-long-password",
+    });
+    for (let n = 0; n < 5; n++)
+      await assert.rejects(
+        verifyEmail({
+          challengeId: c.challengeId,
+          code: code === "000000" ? "111111" : "000000",
+        }),
+      );
+    await assert.rejects(verifyEmail({ challengeId: c.challengeId, code }));
+    assert.equal(
+      (
+        await db.emailVerification.findUniqueOrThrow({
+          where: { id: c.challengeId },
+        })
+      ).attempts,
+      5,
+    );
+    await db.rateLimit.deleteMany({}); // Dedicated test database only: advance the resend test window.
+    const newer = await resendVerification(c.challengeId);
+    await assert.rejects(verifyEmail({ challengeId: c.challengeId, code }));
+    await db.emailVerification.update({
+      where: { id: newer.challengeId },
+      data: { expiresAt: new Date(Date.now() - 1) },
+    });
+    await assert.rejects(verifyEmail({ challengeId: newer.challengeId, code }));
+    assert.equal(
+      (await db.user.findUniqueOrThrow({ where: { email } })).emailVerifiedAt,
+      null,
+    );
+  } finally {
+    globalThis.fetch = original;
+    await db.user.deleteMany({ where: { email } });
+  }
+});
+test("email delivery failure never activates the account or returns a code", async () => {
+  const original = globalThis.fetch,
+    email = `${crypto.randomUUID()}@example.invalid`;
+  globalThis.fetch = async () =>
+    Response.json({ error: "mail unavailable" }, { status: 503 });
+  try {
+    await assert.rejects(
+      registerAccount({ email, password: "another-long-password" }),
+      /could not send/,
+    );
+    const u = await db.user.findUniqueOrThrow({ where: { email } });
+    assert.equal(u.emailVerifiedAt, null);
+    assert.equal(
+      await db.emailVerification.count({ where: { userId: u.id } }),
+      0,
+    );
+    assert.equal(await db.session.count({ where: { userId: u.id } }), 0);
+  } finally {
+    globalThis.fetch = original;
+    await db.user.deleteMany({ where: { email } });
   }
 });
 test.after(() => db.$disconnect());

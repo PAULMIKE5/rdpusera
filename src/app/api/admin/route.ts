@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { countries, operatingSystems, planDescription } from "@/lib/countries";
+import {
+  countries,
+  operatingSystems,
+  planDescription,
+  checkoutSystems,
+  osFamily,
+} from "@/lib/countries";
 import bcrypt from "bcryptjs";
 import { auth, origin, limit, HttpError, encrypt } from "@/lib/security";
 import { route, json, body } from "@/lib/http";
@@ -48,6 +54,8 @@ export const GET = route(async (req) => {
         name: true,
         role: true,
         disabled: true,
+        emailVerificationRequired: true,
+        emailVerifiedAt: true,
         wallet: true,
       },
       orderBy: { createdAt: "desc" },
@@ -97,6 +105,8 @@ export const GET = route(async (req) => {
         id: true,
         planId: true,
         label: true,
+        countryCode: true,
+        os: true,
         ip: true,
         port: true,
         state: true,
@@ -145,7 +155,7 @@ const planSchema = z.object({
   cpu: z.number().int().min(1).max(32),
   ram: z.number().int().min(1).max(128),
   disk: z.number().int().min(20).max(2000),
-  baseCents: z.number().int().min(100).max(100000),
+  baseCents: z.number().int().min(10).max(100000),
   stock: z.number().int().min(0).max(10000),
   enabled: z.boolean(),
 });
@@ -197,9 +207,14 @@ const input = z.discriminatedUnion("action", [
   z.object({ action: z.literal("fulfill"), data: deliveryInput }),
   z.object({
     action: z.literal("inventory"),
-    data: connectionInput
-      .omit({ id: true })
-      .extend({ planId: z.string(), label: z.string().min(1).max(100) }),
+    data: connectionInput.omit({ id: true }).extend({
+      planId: z.string(),
+      label: z.string().min(1).max(100),
+      countryCode: z
+        .string()
+        .refine((v) => countries.some((c) => c.code === v)),
+      os: z.enum(checkoutSystems),
+    }),
   }),
   z.object({ action: z.literal("retireInventory"), id: z.string() }),
   z.object({
@@ -368,8 +383,8 @@ export const POST = route(async (req) => {
         throw new HttpError(409, "Only active instances can change plans");
       const plan = await tx.plan.findUniqueOrThrow({ where: { id: s.planId } });
       if (
-        instance.plan.os !== plan.os ||
-        instance.plan.location !== plan.location
+        osFamily(instance.os ?? instance.plan.os) !== osFamily(plan.os) ||
+        (instance.countryCode ?? instance.plan.countryCode) !== plan.countryCode
       )
         throw new HttpError(
           409,

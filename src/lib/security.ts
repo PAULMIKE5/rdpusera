@@ -31,6 +31,14 @@ export function demo() {
   );
 }
 export async function issue(userId: string) {
+  const user = await db.user.findUnique({ where: { id: userId } });
+  if (
+    !user ||
+    user.disabled ||
+    user.deletedAt ||
+    (user.emailVerificationRequired && !user.emailVerifiedAt)
+  )
+    throw new HttpError(403, "Verify your email before signing in");
   const id = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + 8 * 3600000);
   await db.session.create({ data: { id, userId, expiresAt } });
@@ -67,7 +75,9 @@ export async function auth(admin = false) {
       !s ||
       s.userId !== payload.sub ||
       s.expiresAt < new Date() ||
-      s.user.disabled
+      s.user.disabled ||
+      s.user.deletedAt ||
+      (s.user.emailVerificationRequired && !s.user.emailVerifiedAt)
     )
       throw Error();
     if (admin && s.user.role !== "ADMIN")

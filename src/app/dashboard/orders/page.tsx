@@ -65,7 +65,7 @@ export default function Orders() {
             <ul className="my-5 space-y-2">
               {o.items.map((i) => (
                 <li key={i.id} className="text-sm">
-                  {i.name} · {i.location} · {i.cpu} vCPU / {i.ram} GB / {i.disk}{" "}
+                  {i.name} · {i.location} · {i.os} · {i.cpu} vCPU / {i.ram} GB / {i.disk}{" "}
                   GB · {money(i.cents)}{" "}
                   {i.instance?.status === "ACTIVE" && (
                     <Link href="/dashboard/instances" className="text-lime-300">

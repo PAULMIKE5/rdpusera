@@ -13,7 +13,7 @@ export default async function Layout({
     throw e;
   }
   return (
-    <main className="max-w-6xl mx-auto p-5 md:py-10">
+    <main className="page-shell">
       <DashboardNav />
       {children}
     </main>

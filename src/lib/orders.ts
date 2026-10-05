@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { atomic } from "./db";
 import { HttpError, encrypt } from "./security";
 import { price, specs } from "./domain";
+import { countries, osFamily } from "./countries";
 import {
   checkoutInput,
   fingerprint,
@@ -34,6 +35,9 @@ export async function activatePaidOrder(
         ram: item.ram,
         disk: item.disk,
         priceCents: item.cents,
+        countryCode: item.countryCode,
+        os: item.os,
+        location: item.location,
         requestKey: `order-item:${item.id}`,
         status: "PENDING",
         controlMode: "MANUAL",
@@ -46,7 +50,13 @@ export async function activatePaidOrder(
     const candidates =
       item.cpu <= plan.cpu && item.ram <= plan.ram && item.disk <= plan.disk
         ? await tx.inventoryServer.findMany({
-            where: { planId: item.planId, state: "AVAILABLE", instance: null },
+            where: {
+              planId: item.planId,
+              state: "AVAILABLE",
+              instance: null,
+              countryCode: item.countryCode ?? "UNKNOWN",
+              os: osFamily(item.os),
+            },
             orderBy: { createdAt: "asc" },
           })
         : [];
@@ -118,7 +128,12 @@ export async function checkout(
       return existing;
     }
     const user = await tx.user.findUnique({ where: { id: userId } });
-    if (!user || user.disabled || user.deletedAt)
+    if (
+      !user ||
+      user.disabled ||
+      user.deletedAt ||
+      (user.emailVerificationRequired && !user.emailVerifiedAt)
+    )
       throw new HttpError(403, "Account unavailable");
     const method =
       s.method === "wallet"
@@ -142,9 +157,22 @@ export async function checkout(
       });
       if (!plan?.enabled || plan.siteLocation?.enabled === false)
         throw new HttpError(409, "A plan or location is unavailable");
-      if (line.cpu < plan.cpu || line.ram < plan.ram || line.disk < plan.disk)
-        throw new HttpError(400, "Configuration below plan minimum");
-      const cents = price(plan, line);
+      if (
+        (line.cpu !== undefined && line.cpu !== plan.cpu) ||
+        (line.ram !== undefined && line.ram !== plan.ram) ||
+        (line.disk !== undefined && line.disk !== plan.disk)
+      )
+        throw new HttpError(
+          400,
+          "Plan hardware is fixed. Remove this item and add the predefined plan again.",
+        );
+      const country = countries.find((c) => c.code === line.countryCode)!;
+      const disabledCountry = await tx.location.findFirst({
+        where: { name: country.name, enabled: false },
+      });
+      if (disabledCountry)
+        throw new HttpError(409, "This country is temporarily unavailable");
+      const cents = plan.baseCents;
       const stock = await tx.plan.updateMany({
         where: { id: plan.id, stock: { gte: line.quantity } },
         data: { stock: { decrement: line.quantity } },
@@ -156,11 +184,12 @@ export async function checkout(
         items.push({
           plan: { connect: { id: plan.id } },
           name: plan.name,
-          location: plan.location,
-          os: plan.os,
-          cpu: line.cpu,
-          ram: line.ram,
-          disk: line.disk,
+          location: country.name,
+          countryCode: country.code,
+          os: line.os,
+          cpu: plan.cpu,
+          ram: plan.ram,
+          disk: plan.disk,
           cents,
         });
     }
@@ -205,7 +234,15 @@ export async function purchase(userId: string, s: z.infer<typeof specs>) {
     requestKey: s.requestKey,
     method: "wallet",
     lines: [
-      { planId: s.planId, cpu: s.cpu, ram: s.ram, disk: s.disk, quantity: 1 },
+      {
+        planId: s.planId,
+        cpu: s.cpu,
+        ram: s.ram,
+        disk: s.disk,
+        quantity: 1,
+        countryCode: s.countryCode,
+        os: s.os,
+      },
     ],
   });
   return { id: order.id };
@@ -248,7 +285,10 @@ export async function fulfill(
       if (
         !server ||
         server.state !== "AVAILABLE" ||
-        server.planId !== instance.planId
+        server.planId !== instance.planId ||
+        server.countryCode !== instance.countryCode ||
+        !server.os ||
+        osFamily(server.os) !== osFamily(instance.os ?? instance.orderItem.os)
       )
         throw new HttpError(
           409,

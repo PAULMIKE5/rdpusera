@@ -15,6 +15,8 @@ export type Plan = {
   enabled: boolean;
 };
 export type CartLine = {
+  countryCode: string;
+  os: "Windows" | "Ubuntu" | "Linux";
   planId: string;
   name: string;
   cpu: number;
@@ -61,6 +63,7 @@ export type Order = {
   items: {
     id: string;
     name: string;
+    countryCode: string | null;
     location: string;
     os: string;
     cpu: number;

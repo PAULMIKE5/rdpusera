@@ -8,20 +8,23 @@ datasource db {
 }
 
 model User {
-  id        String     @id @default(cuid())
-  email     String     @unique
-  password  String
-  role      String     @default("USER")
-  wallet    Int        @default(0)
-  disabled  Boolean    @default(false)
-  createdAt DateTime   @default(now())
-  deletedAt DateTime?
-  name      String     @default("")
-  orders    Order[]
-  sessions  Session[]
-  instances Instance[]
-  payments  Payment[]
-  ledger    Ledger[]
+  id                        String             @id @default(cuid())
+  email                     String             @unique
+  password                  String
+  role                      String             @default("USER")
+  wallet                    Int                @default(0)
+  disabled                  Boolean            @default(false)
+  createdAt                 DateTime           @default(now())
+  emailVerifiedAt           DateTime?
+  emailVerificationRequired Boolean            @default(true)
+  verification              EmailVerification?
+  deletedAt                 DateTime?
+  name                      String             @default("")
+  orders                    Order[]
+  sessions                  Session[]
+  instances                 Instance[]
+  payments                  Payment[]
+  ledger                    Ledger[]
 }
 
 model Session {
@@ -45,7 +48,7 @@ model Plan {
   baseCents    Int
   stock        Int
   enabled      Boolean           @default(true)
-  description  String @default("Residential IP addresses suitable for remote jobs, bot work, and trading.")
+  description  String            @default("Residential IP addresses suitable for remote jobs, bot work, and trading.")
   countryCode  String?
   locationId   String?
   siteLocation Location?         @relation(fields: [locationId], references: [id])
@@ -63,6 +66,9 @@ model Instance {
   cpu            Int
   ram            Int
   disk           Int
+  countryCode    String?
+  os             String?
+  location       String?
   priceCents     Int
   status         String           @default("PROVISIONING")
   requestKey     String
@@ -97,20 +103,20 @@ model Ledger {
 }
 
 model Payment {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
-  cents       Int
-  provider    String
-  providerId  String?  @unique
-  checkoutUrl String?
-  checkoutStarted Boolean @default(false)
-  transactionId String? @unique
-  orderId     String?  @unique
-  order       Order?   @relation(fields: [orderId], references: [id])
-  status      String   @default("PENDING")
-  requestKey  String
-  createdAt   DateTime @default(now())
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  cents           Int
+  provider        String
+  providerId      String?  @unique
+  checkoutUrl     String?
+  checkoutStarted Boolean  @default(false)
+  transactionId   String?  @unique
+  orderId         String?  @unique
+  order           Order?   @relation(fields: [orderId], references: [id])
+  status          String   @default("PENDING")
+  requestKey      String
+  createdAt       DateTime @default(now())
 
   @@unique([userId, requestKey])
 }
@@ -189,33 +195,48 @@ model Order {
 }
 
 model OrderItem {
-  id       String    @id @default(cuid())
-  orderId  String
-  order    Order     @relation(fields: [orderId], references: [id])
-  planId   String
-  plan     Plan      @relation(fields: [planId], references: [id])
-  name     String
-  location String
-  os       String
-  cpu      Int
-  ram      Int
-  disk     Int
-  cents    Int
-  instance Instance?
+  id          String    @id @default(cuid())
+  orderId     String
+  order       Order     @relation(fields: [orderId], references: [id])
+  planId      String
+  plan        Plan      @relation(fields: [planId], references: [id])
+  name        String
+  location    String
+  countryCode String?
+  os          String
+  cpu         Int
+  ram         Int
+  disk        Int
+  cents       Int
+  instance    Instance?
 }
 
 model InventoryServer {
-  id        String    @id @default(cuid())
-  planId    String
-  plan      Plan      @relation(fields: [planId], references: [id])
-  label     String
-  ip        String
-  port      Int       @default(3389)
-  username  String
-  secret    String
-  state     String    @default("AVAILABLE")
-  createdAt DateTime  @default(now())
-  instance  Instance?
+  id          String    @id @default(cuid())
+  planId      String
+  plan        Plan      @relation(fields: [planId], references: [id])
+  label       String
+  countryCode String?
+  os          String?
+  ip          String
+  port        Int       @default(3389)
+  username    String
+  secret      String
+  state       String    @default("AVAILABLE")
+  createdAt   DateTime  @default(now())
+  instance    Instance?
 
   @@unique([ip, port])
+}
+
+model EmailVerification {
+  id        String   @id
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  sentAt    DateTime @default(now())
+
+  @@index([expiresAt])
 }

@@ -1,8 +1,8 @@
 # GlobalRDP Hub
 
-Next.js marketplace with PostgreSQL/Prisma, authenticated customer and admin dashboards, public configurable plans, cart checkout, Flutterwave fiat payments, NOWPayments cryptocurrency payments and encrypted RDP inventory.
+Next.js marketplace with PostgreSQL/Prisma, authenticated customer and admin dashboards, public fixed-spec plans, cart checkout, Flutterwave fiat payments, NOWPayments cryptocurrency payments and encrypted RDP inventory.
 
-**Existing Netlify deployment:** follow [the browser-only upgrade guide](docs/GATEWAYS-UPGRADE.md). It includes the Neon SQL file, manual GitHub upload steps, payment keys, webhook URLs and rollout checks. Source changes are not a live deployment.
+**Existing Netlify deployment:** follow [the email and cart upgrade guide](docs/EMAIL-CART-UPGRADE.md). It includes the Neon SQL file, manual GitHub upload steps, payment keys, webhook URLs and rollout checks. Source changes are not a live deployment.
 
 ## Local setup
 
@@ -25,13 +25,15 @@ The seed creates example catalog plans and the configured admin account; it does
 
 ## Routes and behavior
 
-- `/`: public catalog, Windows-first OS filters, 100-country selection and hardware configuration.
-- `/cart`: persistent cart; login required at checkout.
+- `/`: public catalog with locked hardware and prices.
+- `/cart`: persistent cart with required country selection and Windows-first OS selection; verified login required at checkout.
 - `/dashboard`: account balance, active instances and plans. Orders, billing, instances and settings are nested routes.
 - `/admin`: restricted plans/pricing, locations, payment methods, encrypted integration keys, users, orders and inventory management.
 - `/api/webhooks/flutterwave` and `/api/webhooks/nowpayments`: authenticated callbacks verified against provider APIs.
 
-Paid orders claim matching ready inventory atomically. Unavailable or customized servers stay pending for admin delivery; the order completes only when all items are delivered. The 30-day term starts at delivery. Wallet debits, reservations, order transitions and receipt deduplication run in database transactions. Pricing uses integer USD cents. Connection passwords and admin integration keys are encrypted; authentication uses bcrypt, JWT and revocable database sessions. Mutations enforce authentication, origin checks, validation and rate limits.
+New accounts activate only after an emailed six-digit OTP is verified. Configure RESEND_API_KEY and EMAIL_FROM before launch.
+
+Paid orders claim ready inventory matching the plan, country and OS atomically. Unavailable configurations stay pending for admin delivery; the order completes only when all items are delivered. The 30-day term starts at delivery. Wallet debits, reservations, order transitions and receipt deduplication run in database transactions. Pricing uses integer USD cents. Connection passwords and admin integration keys are encrypted; authentication uses bcrypt, JWT and revocable database sessions. Mutations enforce authentication, origin checks, validation and rate limits.
 
 Manual instances use admin service requests for restart/termination; those buttons do not themselves operate a hosting provider. Existing AUTO instances may still use `npm run worker` with a compatible `PROVISIONER_URL`/`PROVISIONER_TOKEN` adapter. New inventory/manual delivery does not require that worker.
 
