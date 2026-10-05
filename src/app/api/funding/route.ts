@@ -11,7 +11,7 @@ export const POST = route(async (req) => {
   const s = z
     .object({
       cents: z.number().int().min(500).max(100000),
-      provider: z.enum(["stripe", "crypto", "demo"]),
+      provider: z.enum(["flutterwave", "nowpayments", "demo"]),
       requestKey: z.string().uuid(),
     })
     .parse(await body(req));

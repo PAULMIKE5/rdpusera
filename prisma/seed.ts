@@ -29,6 +29,7 @@ async function main() {
           region,
           location,
           locationId: loc.id,
+          countryCode: region === "US" ? "US" : region === "EU" ? "DE" : "SG",
           os,
           cpu: 2,
           ram: 4,

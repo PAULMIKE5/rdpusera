@@ -1,11 +1,10 @@
 import { db } from "./db";
 import { decrypt, required, HttpError } from "./security";
 export const editableKeys = [
-  "STRIPE_SECRET_KEY",
-  "STRIPE_WEBHOOK_SECRET",
-  "CRYPTO_API_KEY",
-  "CRYPTO_WEBHOOK_SECRET",
-  "CRYPTO_CHECKOUT_URL",
+  "FLUTTERWAVE_SECRET_KEY",
+  "FLUTTERWAVE_WEBHOOK_SECRET",
+  "NOWPAYMENTS_API_KEY",
+  "NOWPAYMENTS_IPN_SECRET",
 ] as const;
 export async function systemKey(name: (typeof editableKeys)[number]) {
   const row = await db.systemKey.findUnique({ where: { name } });

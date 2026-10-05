@@ -65,7 +65,7 @@ export const GET = route(async (req) => {
     throw new HttpError(409, "RDP unavailable");
   const clean = (v: string) => v.replace(/[\r\n]/g, "");
   return new Response(
-    `full address:s:${clean(i.ip)}:${i.port}\r\nusername:s:${clean(i.username ?? "Administrator")}\r\nprompt for credentials:i:1\r\nauthentication level:i:2\r\n`,
+    `full address:s:${i.ip.includes(":") ? `[${clean(i.ip)}]` : clean(i.ip)}:${i.port}\r\nusername:s:${clean(i.username ?? "Administrator")}\r\nprompt for credentials:i:1\r\nauthentication level:i:2\r\n`,
     {
       headers: {
         "Content-Type": "application/x-rdp",

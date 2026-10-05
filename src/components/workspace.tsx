@@ -136,8 +136,18 @@ export function Workspace({ children }: { children: ReactNode }) {
         </div>
       )}
       {children}
+      {cart.length > 0 && (
+        <Link
+          href="/cart"
+          className="cart-fab"
+          aria-label={`Open cart, ${cart.reduce((n, l) => n + l.quantity, 0)} items`}
+        >
+          <ShoppingCart size={22} />
+          <span>Cart ({cart.reduce((n, l) => n + l.quantity, 0)})</span>
+        </Link>
+      )}
       <footer className="border-t border-slate-800 p-6 text-center text-xs muted">
-        GlobalRDP Hub · Prepaid compute · Secure manual delivery
+        GlobalRDP Hub · Prepaid compute · Secure server delivery
       </footer>
     </Context.Provider>
   );

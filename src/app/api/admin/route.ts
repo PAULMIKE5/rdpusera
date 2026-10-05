@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { countries, operatingSystems, planDescription } from "@/lib/countries";
 import bcrypt from "bcryptjs";
 import { auth, origin, limit, HttpError, encrypt } from "@/lib/security";
 import { route, json, body } from "@/lib/http";
@@ -137,8 +138,10 @@ export const GET = route(async (req) => {
 const planSchema = z.object({
   id: z.string().optional(),
   name: z.string().trim().min(2).max(100),
-  locationId: z.string(),
-  os: z.enum(["Windows Server 2019", "Windows Server 2022", "Ubuntu 24.04"]),
+  locationId: z.string().optional(),
+  countryCode: z.string().optional(),
+  description: z.string().trim().min(1).max(2000).default(planDescription),
+  os: z.enum(operatingSystems),
   cpu: z.number().int().min(1).max(32),
   ram: z.number().int().min(1).max(128),
   disk: z.number().int().min(20).max(2000),
@@ -159,7 +162,13 @@ const input = z.discriminatedUnion("action", [
     action: z.literal("method"),
     id: z.string().optional(),
     label: z.string().trim().min(2).max(80),
-    provider: z.enum(["stripe", "crypto", "manual"]),
+    provider: z.enum([
+      "flutterwave",
+      "nowpayments",
+      "manual",
+      "stripe",
+      "crypto",
+    ]),
     instructions: z.string().max(2000),
     enabled: z.boolean(),
   }),
@@ -231,9 +240,29 @@ export const POST = route(async (req) => {
   await atomic(async (tx) => {
     if (s.action === "plan") {
       const { id, ...data } = s.data;
-      const loc = await tx.location.findUnique({
-        where: { id: data.locationId },
-      });
+      const country = countries.find((c) => c.code === data.countryCode);
+      if (data.countryCode && !country)
+        throw new HttpError(400, "Select a supported country");
+      const previous = id
+        ? await tx.plan.findUniqueOrThrow({ where: { id } })
+        : null;
+      const keepLocation =
+        previous &&
+        previous.countryCode === (data.countryCode || null) &&
+        data.locationId === previous.locationId;
+      const loc =
+        country && !keepLocation
+          ? await tx.location.upsert({
+              where: {
+                region_name: { region: country.region, name: country.name },
+              },
+              create: { name: country.name, region: country.region },
+              update: {},
+            })
+          : data.locationId
+            ? await tx.location.findUnique({ where: { id: data.locationId } })
+            : null;
+      if (loc) data.locationId = loc.id;
       if (!loc) throw new HttpError(400, "Select a location");
       if (id) {
         const old = await tx.plan.findUniqueOrThrow({ where: { id } });
@@ -279,6 +308,11 @@ export const POST = route(async (req) => {
     }
     if (s.action === "method") {
       const { action, id, ...data } = s;
+      if (["stripe", "crypto"].includes(data.provider) && data.enabled)
+        throw new HttpError(
+          400,
+          "Use Flutterwave or NOWPayments for new payments",
+        );
       if (id) {
         const old = await tx.paymentMethod.findUniqueOrThrow({ where: { id } });
         if (old.provider !== data.provider)
@@ -290,19 +324,6 @@ export const POST = route(async (req) => {
       } else await tx.paymentMethod.create({ data });
     }
     if (s.action === "key") {
-      if (s.name === "CRYPTO_CHECKOUT_URL") {
-        const url = new URL(s.value);
-        if (
-          url.protocol !== "https:" ||
-          url.username ||
-          url.password ||
-          url.hash
-        )
-          throw new HttpError(
-            400,
-            "Use an HTTPS gateway URL without embedded credentials",
-          );
-      }
       await tx.systemKey.upsert({
         where: { name: s.name },
         create: { name: s.name, ciphertext: encrypt(s.value) },
@@ -321,6 +342,11 @@ export const POST = route(async (req) => {
     }
     if (s.action === "inventory") {
       const { password, ...data } = s.data;
+      if (!(await tx.plan.findUnique({ where: { id: data.planId } })))
+        throw new HttpError(
+          400,
+          "Select an existing plan before adding a server",
+        );
       await tx.inventoryServer.create({
         data: { ...data, secret: encrypt(password) },
       });

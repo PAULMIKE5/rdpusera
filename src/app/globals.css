@@ -79,3 +79,32 @@ dialog {
   background: #101722;
   color: #e6edf7;
 }
+
+/* 16px controls prevent iOS focus zoom; keep the cart above safe areas. */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+.cart-fab {
+  position: fixed;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 999px;
+  padding: 16px 22px;
+  background: #bef264;
+  color: #0f172a;
+  font-weight: 700;
+  box-shadow: 0 8px 30px #0008;
+}
+body {
+  padding-bottom: 88px;
+}
+.cart-fab:focus-visible {
+  outline: 3px solid white;
+  outline-offset: 4px;
+}

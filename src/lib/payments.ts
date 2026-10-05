@@ -1,73 +1,108 @@
-import Stripe from "stripe";
-import { z } from "zod";
 import { db } from "./db";
 import { HttpError, required } from "./security";
 import { systemKey } from "./config";
-export async function checkoutPayment(id: string) {
-  const p = await db.payment.findUniqueOrThrow({ where: { id } });
-  if (p.status === "PAID") return { paid: true };
-  if (p.provider === "manual") return { manual: true };
-  if (p.checkoutUrl) return { url: p.checkoutUrl };
-  const app = required("APP_URL");
-  const destination = p.orderId ? "/dashboard/orders" : "/dashboard/billing";
-  if (p.provider === "stripe") {
-    const stripe = new Stripe(await systemKey("STRIPE_SECRET_KEY"));
-    const session = await stripe.checkout.sessions.create(
-      {
-        mode: "payment",
-        client_reference_id: p.id,
-        metadata: { paymentId: p.id },
-        line_items: [
-          {
-            quantity: 1,
-            price_data: {
-              currency: "usd",
-              unit_amount: p.cents,
-              product_data: {
-                name: p.orderId
-                  ? `RDP order ${p.orderId}`
-                  : "GlobalRDP wallet credit",
-              },
-            },
-          },
-        ],
-        success_url: `${app}${destination}?payment=success`,
-        cancel_url: `${app}${destination}?payment=cancelled`,
-      },
-      { idempotencyKey: p.id },
-    );
-    await db.payment.update({
-      where: { id },
-      data: { providerId: session.id, checkoutUrl: session.url },
-    });
-    return { url: session.url };
-  }
-  if (p.provider !== "crypto") throw new HttpError(400, "Unsupported provider");
-  const gateway = new URL(await systemKey("CRYPTO_CHECKOUT_URL"));
-  if (gateway.protocol !== "https:")
-    throw new HttpError(503, "Gateway requires HTTPS");
-  const r = await fetch(gateway, {
-    method: "POST",
+export async function gatewayFetch(
+  url: string,
+  key: string,
+  init: RequestInit = {},
+  now = false,
+) {
+  const response = await fetch(url, {
+    ...init,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${await systemKey("CRYPTO_API_KEY")}`,
-      "Idempotency-Key": p.id,
+      ...(now ? { "x-api-key": key } : { Authorization: `Bearer ${key}` }),
     },
-    body: JSON.stringify({
-      paymentId: p.id,
-      cents: p.cents,
-      currency: "USD",
-      callbackUrl: `${app}/api/webhooks/crypto`,
-    }),
     signal: AbortSignal.timeout(15000),
   });
-  if (!r.ok) throw new HttpError(502, "Payment gateway unavailable");
-  const result = z
-    .object({ id: z.string(), url: z.string().url().startsWith("https://") })
-    .parse(await r.json());
+  if (!response.ok)
+    throw new HttpError(
+      502,
+      "Payment provider unavailable. Check your payment status before trying again.",
+    );
+  return response.json();
+}
+export async function checkoutPayment(id: string) {
+  const p = await db.payment.findUniqueOrThrow({
+    where: { id },
+    include: { user: true },
+  });
+  if (p.status === "PAID") return { paid: true };
+  if (p.status !== "PENDING")
+    throw new HttpError(409, "Payment is not pending");
+  if (p.provider === "manual") return { manual: true };
+  if (p.checkoutUrl) return { url: p.checkoutUrl };
+  if (!["flutterwave", "nowpayments"].includes(p.provider))
+    throw new HttpError(
+      409,
+      "Legacy payment requires administrator reconciliation",
+    );
+  const app = required("APP_URL");
+  const key = await systemKey(
+    p.provider === "flutterwave"
+      ? "FLUTTERWAVE_SECRET_KEY"
+      : "NOWPAYMENTS_API_KEY",
+  );
+  // These invoice APIs do not guarantee idempotency. Never create another invoice after an ambiguous timeout.
+  const claim = await db.payment.updateMany({
+    where: { id, checkoutStarted: false, status: "PENDING" },
+    data: { checkoutStarted: true },
+  });
+  if (!claim.count)
+    throw new HttpError(
+      409,
+      "Checkout is being prepared or needs administrator reconciliation. Do not pay twice.",
+    );
+  const destination = `${app}${p.orderId ? "/dashboard/orders" : "/dashboard/billing"}`;
+  let providerId: string, url: string;
+  if (p.provider === "flutterwave") {
+    const r = await gatewayFetch(
+      "https://api.flutterwave.com/v3/payments",
+      key,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          tx_ref: p.id,
+          amount: (p.cents / 100).toFixed(2),
+          currency: "USD",
+          redirect_url: destination,
+          customer: { email: p.user.email, name: p.user.name || p.user.email },
+          customizations: { title: "GlobalRDP Hub" },
+        }),
+      },
+    );
+    if (r.status !== "success")
+      throw new HttpError(502, "Flutterwave checkout was not created");
+    providerId = p.id;
+    url = r.data?.link;
+  } else {
+    const r = await gatewayFetch(
+      "https://api.nowpayments.io/v1/invoice",
+      key,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          price_amount: p.cents / 100,
+          price_currency: "usd",
+          order_id: p.id,
+          order_description: p.orderId
+            ? `RDP order ${p.orderId}`
+            : "Wallet funding",
+          ipn_callback_url: `${app}/api/webhooks/nowpayments`,
+          success_url: destination,
+          cancel_url: destination,
+        }),
+      },
+      true,
+    );
+    providerId = String(r.id ?? "");
+    url = r.invoice_url;
+  }
+  if (!providerId || typeof url !== "string" || !url.startsWith("https://"))
+    throw new HttpError(502, "Invalid checkout response; contact support");
   await db.payment.update({
     where: { id },
-    data: { providerId: result.id, checkoutUrl: result.url },
+    data: { providerId, checkoutUrl: url },
   });
-  return { url: result.url };
+  return { url };
 }

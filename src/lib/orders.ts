@@ -23,8 +23,9 @@ export async function activatePaidOrder(
     where: { id: orderId },
     data: { status: "PENDING", paidAt: new Date() },
   });
-  for (const item of order.items)
-    await tx.instance.create({
+  let pending = 0;
+  for (const item of order.items) {
+    const instance = await tx.instance.create({
       data: {
         userId: order.userId,
         planId: item.planId,
@@ -38,6 +39,56 @@ export async function activatePaidOrder(
         controlMode: "MANUAL",
         expiresAt: new Date(Date.now() + 30 * 86400000),
       },
+    });
+    const plan = await tx.plan.findUniqueOrThrow({
+      where: { id: item.planId },
+    });
+    const candidates =
+      item.cpu <= plan.cpu && item.ram <= plan.ram && item.disk <= plan.disk
+        ? await tx.inventoryServer.findMany({
+            where: { planId: item.planId, state: "AVAILABLE", instance: null },
+            orderBy: { createdAt: "asc" },
+          })
+        : [];
+    let assigned = false;
+    const customer = await tx.user.findUniqueOrThrow({
+      where: { id: order.userId },
+    });
+    for (const server of candidates) {
+      if (customer.disabled || customer.deletedAt) break;
+      const conflict = await tx.instance.count({
+        where: {
+          ip: server.ip,
+          port: server.port,
+          status: { in: ["ACTIVE", "RESTARTING", "TERMINATING"] },
+        },
+      });
+      if (conflict) continue;
+      const reserved = await tx.inventoryServer.updateMany({
+        where: { id: server.id, state: "AVAILABLE" },
+        data: { state: "ASSIGNED" },
+      });
+      if (!reserved.count) continue;
+      await tx.instance.update({
+        where: { id: instance.id },
+        data: {
+          status: "ACTIVE",
+          inventoryId: server.id,
+          ip: server.ip,
+          port: server.port,
+          username: server.username,
+          secret: server.secret,
+        },
+      });
+      assigned = true;
+      break;
+    }
+    if (!assigned) pending++;
+  }
+  if (!pending)
+    await tx.order.update({
+      where: { id: orderId },
+      data: { status: "COMPLETE", completedAt: new Date() },
     });
   await tx.ledger.create({
     data: {
@@ -75,7 +126,13 @@ export async function checkout(
         : await tx.paymentMethod.findFirst({
             where: { id: s.method, enabled: true },
           });
-    if (!method) throw new HttpError(409, "Payment method unavailable");
+    if (
+      !method ||
+      !["wallet", "manual", "flutterwave", "nowpayments"].includes(
+        method.provider,
+      )
+    )
+      throw new HttpError(409, "Payment method unavailable");
     const items: Prisma.OrderItemCreateWithoutOrderInput[] = [];
     let totalCents = 0;
     for (const line of s.lines) {

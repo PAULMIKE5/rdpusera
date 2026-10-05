@@ -1,3 +1,5 @@
+> Historical first-upgrade guide. For the current Flutterwave/NOWPayments and automatic inventory release, follow [GATEWAYS-UPGRADE.md](GATEWAYS-UPGRADE.md).
+
 # Upgrade the existing Netlify site (browser-only)
 
 This release changes **new** purchases to manual delivery. Existing automated instances and their jobs remain available. No production database was accessed during implementation.

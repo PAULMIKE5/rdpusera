@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Catalog } from "@/components/catalog";
 export default function Home() {
   return (
@@ -14,21 +13,19 @@ export default function Home() {
         </h1>
         <p className="muted mt-6 max-w-xl text-lg">
           Find your Windows RDP or Linux VPS. Choose a plan, pay securely, and
-          receive your access details after our team prepares your server.
+          receive available servers automatically. If inventory is unavailable,
+          our team prepares your server.
         </p>
         <div className="flex gap-4 mt-8">
           <a className="primary" href="#plans">
             Explore plans
           </a>
-          <Link className="secondary" href="/dashboard">
-            My dashboard
-          </Link>
         </div>
         <div className="grid md:grid-cols-3 gap-4 mt-10">
           {[
             "1. Configure and add to cart",
-            "2. Pay · order becomes pending",
-            "3. Admin delivers your access",
+            "2. Pay securely",
+            "3. Instant assignment or pending delivery",
           ].map((t) => (
             <div className="panel p-5" key={t}>
               {t}

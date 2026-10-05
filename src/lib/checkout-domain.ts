@@ -33,9 +33,20 @@ export function fingerprint(s: z.infer<typeof checkoutInput>) {
 }
 export const connectionInput = z.object({
   id: z.string(),
-  ip: z.string().ip(),
+  ip: z
+    .string()
+    .trim()
+    .ip("Enter an IPv4 or IPv6 address only; enter the port separately."),
   port: z.number().int().min(1).max(65535),
-  username: z.string().regex(/^[a-zA-Z0-9._@-]{1,64}$/),
+  username: z
+    .string()
+    .trim()
+    .min(1)
+    .max(128)
+    .regex(
+      /^[a-zA-Z0-9._@\\ -]+$/,
+      "Use a valid server username, such as Administrator or DOMAIN\\user.",
+    ),
   password: z.string().min(1).max(512),
 });
 

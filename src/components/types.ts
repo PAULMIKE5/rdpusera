@@ -1,4 +1,6 @@
 export type Plan = {
+  countryCode?: string | null;
+  description?: string;
   id: string;
   name: string;
   region: string;

@@ -6,6 +6,7 @@ export async function credit(
   provider: string,
   cents: number,
   providerId: string,
+  transactionId?: string,
 ) {
   return atomic(async (tx) => {
     const p = await tx.payment.findUnique({
@@ -16,13 +17,22 @@ export async function credit(
       !p ||
       p.provider !== provider ||
       p.cents !== cents ||
-      p.providerId !== providerId
+      (p.providerId !== providerId &&
+        !(transactionId && p.checkoutStarted && !p.providerId))
     )
       throw new HttpError(400, "Payment mismatch");
-    if (p.status === "PAID") return;
+    if (p.status === "PAID") {
+      if (transactionId && p.transactionId !== transactionId)
+        throw new HttpError(409, "Duplicate payment requires reconciliation");
+      return;
+    }
     const updated = await tx.payment.updateMany({
       where: { id: p.id, status: "PENDING" },
-      data: { status: "PAID" },
+      data: {
+        status: "PAID",
+        providerId,
+        ...(transactionId ? { transactionId } : {}),
+      },
     });
     if (!updated.count) return;
     if (p.order && p.order.status === "AWAITING_PAYMENT") {

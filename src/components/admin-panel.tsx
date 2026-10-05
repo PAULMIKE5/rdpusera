@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { api, useWorkspace } from "./workspace";
+import { countries, operatingSystems, planDescription } from "@/lib/countries";
 import { money } from "@/lib/domain";
 import type { Plan, Order, Instance, Method } from "./types";
 type Location = { id: string; name: string; region: string; enabled: boolean };
@@ -46,6 +47,7 @@ type Field = {
   type?:
     "text" | "number" | "password" | "checkbox" | "datetime-local" | "textarea";
   options?: { value: string; label: string }[];
+  step?: number;
   min?: number;
   max?: number;
   optional?: boolean;
@@ -130,6 +132,7 @@ function Editor({
               name={f.name}
               type={f.type ?? "text"}
               defaultValue={String(f.value ?? "")}
+              step={f.step}
               min={f.min}
               max={f.max}
               required={!f.optional}
@@ -187,28 +190,27 @@ export function AdminPanel() {
     value: p.id,
     label: `${p.name} · ${p.location} · ${p.os}`,
   }));
-  const locationOptions = data.locations.map((l) => ({
-    value: l.id,
-    label: `${l.name} (${l.region})${l.enabled ? "" : " · disabled"}`,
-  }));
   function planFields(p?: Plan): Field[] {
     return [
       { name: "name", label: "Plan name", value: p?.name },
       {
-        name: "locationId",
-        label: "Location",
-        value: p?.locationId,
-        options: locationOptions,
+        name: "description",
+        label: "Plan description",
+        type: "textarea",
+        value: p?.description ?? planDescription,
+      },
+      {
+        name: "countryCode",
+        label: "Server country (100 countries)",
+        value: p?.countryCode,
+        optional: !!p?.locationId,
+        options: countries.map((c) => ({ value: c.code, label: c.name })),
       },
       {
         name: "os",
         label: "Operating system",
-        value: p?.os ?? "Windows Server 2022",
-        options: [
-          "Windows Server 2019",
-          "Windows Server 2022",
-          "Ubuntu 24.04",
-        ].map((v) => ({ value: v, label: v })),
+        value: p?.os ?? "Windows",
+        options: operatingSystems.map((v) => ({ value: v, label: v })),
       },
       ...(["cpu", "ram", "disk"] as const).map((k) => ({
         name: k,
@@ -219,12 +221,13 @@ export function AdminPanel() {
         max: k === "cpu" ? 32 : k === "ram" ? 128 : 2000,
       })),
       {
-        name: "baseCents",
-        label: "Price in USD cents (2400 = $24)",
+        name: "price",
+        label: "Price in USD / 30 days",
         type: "number",
-        value: p?.baseCents ?? 2400,
-        min: 100,
-        max: 100000,
+        value: (p?.baseCents ?? 2400) / 100,
+        step: 0.01,
+        min: 1,
+        max: 1000,
       },
       {
         name: "stock",
@@ -266,8 +269,11 @@ export function AdminPanel() {
         label: "Provider (cannot change after creation)",
         value: m?.provider ?? "manual",
         options: [
-          { value: "stripe", label: "Stripe" },
-          { value: "crypto", label: "Crypto gateway" },
+          { value: "flutterwave", label: "Flutterwave (fiat)" },
+          { value: "nowpayments", label: "NOWPayments (crypto)" },
+          ...(m && ["stripe", "crypto"].includes(m.provider)
+            ? [{ value: m.provider, label: "Legacy (disabled)" }]
+            : []),
           { value: "manual", label: "Manual / bank transfer" },
         ],
       },
@@ -306,7 +312,7 @@ export function AdminPanel() {
         <div>
           <h1 className="text-3xl">Admin control center</h1>
           <p className="muted mt-2">
-            Manage your catalog, customers, payments and manual delivery.
+            Manage your catalog, customers, payments and inventory delivery.
           </p>
         </div>
         <button
@@ -464,15 +470,23 @@ export function AdminPanel() {
           <>
             <p className="muted mb-5">
               Prices affect future purchases. Stock is saleable capacity, not
-              proof that a physical server exists. Create a location first if
-              this list is empty.
+              proof that a physical server exists. Selecting a country creates
+              its location automatically.
             </p>
             <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
               <Editor
                 title="Create plan"
                 fields={planFields()}
                 label="Create plan"
-                submit={(v) => save({ action: "plan", data: v })}
+                submit={(v) =>
+                  save({
+                    action: "plan",
+                    data: {
+                      ...v,
+                      baseCents: Math.round(Number(v.price) * 100),
+                    },
+                  })
+                }
               />
               {data.plans.map((p) => (
                 <Editor
@@ -480,7 +494,15 @@ export function AdminPanel() {
                   title={`${p.name} · ${p.location}`}
                   fields={planFields(p)}
                   submit={(v) =>
-                    save({ action: "plan", data: { id: p.id, ...v } })
+                    save({
+                      action: "plan",
+                      data: {
+                        id: p.id,
+                        locationId: p.locationId,
+                        ...v,
+                        baseCents: Math.round(Number(v.price) * 100),
+                      },
+                    })
                   }
                 />
               ))}
@@ -536,7 +558,7 @@ export function AdminPanel() {
               forms do not change existing keys. JWT_SECRET, CREDENTIAL_KEY,
               DATABASE_URL and APP_URL remain managed in Netlify; changing the
               encryption root here would make stored credentials unreadable.
-              Gateway URLs must point to your trusted payment adapter.
+              Provider API URLs are fixed to Flutterwave and NOWPayments.
             </p>
             <div className="grid md:grid-cols-2 gap-4">
               {data.keys.map((k) => (
@@ -671,10 +693,10 @@ export function AdminPanel() {
         {tab === "Available servers" && (
           <>
             <p className="muted mb-5">
-              Store ready servers here to assign during delivery. Adding a
-              server does not change plan stock: set saleable capacity in Plans.
-              Inventory servers match the plan's base specs; customized orders
-              require manually verified access details.
+              Paid orders automatically receive a matching ready server. Adding
+              a server does not change plan stock: set saleable capacity in
+              Plans. Inventory servers match the plan's base specs; customized
+              orders require manually verified access details.
             </p>
             <Editor
               title="Add ready server"
@@ -684,7 +706,12 @@ export function AdminPanel() {
                 ...connectionFields(),
               ]}
               label="Save encrypted server details"
-              submit={(v) => save({ action: "inventory", data: v })}
+              submit={(v) =>
+                save({
+                  action: "inventory",
+                  data: v,
+                })
+              }
             />
             <div className="panel overflow-auto mt-6">
               <table className="w-full">

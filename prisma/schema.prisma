@@ -45,6 +45,8 @@ model Plan {
   baseCents    Int
   stock        Int
   enabled      Boolean           @default(true)
+  description  String @default("Residential IP addresses suitable for remote jobs, bot work, and trading.")
+  countryCode  String?
   locationId   String?
   siteLocation Location?         @relation(fields: [locationId], references: [id])
   inventory    InventoryServer[]
@@ -102,6 +104,8 @@ model Payment {
   provider    String
   providerId  String?  @unique
   checkoutUrl String?
+  checkoutStarted Boolean @default(false)
+  transactionId String? @unique
   orderId     String?  @unique
   order       Order?   @relation(fields: [orderId], references: [id])
   status      String   @default("PENDING")

@@ -3,11 +3,13 @@ import { useEffect, useState } from "react";
 import { Server, ArrowUpRight } from "lucide-react";
 import { api, useWorkspace } from "./workspace";
 import type { Plan } from "./types";
+import { countries, operatingSystems, planDescription } from "@/lib/countries";
 import { money, price } from "@/lib/domain";
 export function Catalog() {
   const [plans, setPlans] = useState<Plan[]>([]),
     [loading, setLoading] = useState(true),
     [region, setRegion] = useState(""),
+    [country, setCountry] = useState(""),
     [os, setOs] = useState(""),
     [minimum, setMinimum] = useState({ cpu: 0, ram: 0, disk: 0 });
   const { cart, setCart, setNotice } = useWorkspace();
@@ -20,7 +22,13 @@ export function Catalog() {
   const filtered = plans.filter(
     (p) =>
       (!region || p.region === region) &&
-      (!os || p.os === os) &&
+      (!country ||
+        p.countryCode === country ||
+        p.location === countries.find((c) => c.code === country)?.name) &&
+      (!os ||
+        p.os === os ||
+        (os === "Windows" && p.os.startsWith("Windows")) ||
+        (os === "Ubuntu" && p.os.startsWith("Ubuntu"))) &&
       p.cpu >= minimum.cpu &&
       p.ram >= minimum.ram &&
       p.disk >= minimum.disk,
@@ -62,7 +70,7 @@ export function Catalog() {
   }
   return (
     <>
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-6">
         <label>
           Region
           <select value={region} onChange={(e) => setRegion(e.target.value)}>
@@ -73,12 +81,25 @@ export function Catalog() {
           </select>
         </label>
         <label>
+          Country
+          <select value={country} onChange={(e) => setCountry(e.target.value)}>
+            <option value="">All countries</option>
+            {countries.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
           Operating system
           <select value={os} onChange={(e) => setOs(e.target.value)}>
             <option value="">All systems</option>
-            {[...new Set(plans.map((p) => p.os))].map((r) => (
-              <option key={r}>{r}</option>
-            ))}
+            {[...new Set([...operatingSystems, ...plans.map((p) => p.os)])].map(
+              (r) => (
+                <option key={r}>{r}</option>
+              ),
+            )}
           </select>
         </label>
         {(["cpu", "ram", "disk"] as const).map((k) => (
@@ -134,6 +155,7 @@ function PlanCard({
       <p className="muted text-sm my-3">
         {p.location} · {p.os}
       </p>
+      <p className="muted text-sm">{p.description || planDescription}</p>
       <div className="grid grid-cols-3 gap-2 my-5">
         {(["cpu", "ram", "disk"] as const).map((k) => (
           <label key={k}>

@@ -153,9 +153,10 @@ export default function Cart() {
               </strong>
             </div>
             <p className="muted text-sm">
-              After verified payment your order is pending. An administrator
-              prepares your server and enters its connection details. Your
-              30-day term begins at delivery. No automatic renewal.
+              After verified payment, matching available servers are assigned
+              automatically. Otherwise your order stays pending for
+              administrator delivery. Your 30-day term begins at delivery. No
+              automatic renewal.
             </p>
             <button
               className="primary w-full"

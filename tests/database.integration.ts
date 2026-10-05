@@ -1,5 +1,8 @@
 import "dotenv/config";
 import test from "node:test";
+import { POST as webhook } from "../src/app/api/webhooks/[provider]/route";
+import { checkoutPayment } from "../src/lib/payments";
+import { nowSignature } from "../src/lib/gateway-security";
 import assert from "node:assert/strict";
 import { db } from "../src/lib/db";
 import { checkout, fulfill, cancelUnpaid } from "../src/lib/orders";
@@ -162,7 +165,7 @@ test("insufficient wallet rolls back reservations and order creation", async () 
 });
 test("verified webhook settles once without double wallet credit; wrong amounts rejected", async () => {
   const f = await fixture(),
-    m = await method("stripe");
+    m = await method("flutterwave");
   try {
     const o = await checkout(f.user.id, f.cart(m.id));
     assert.equal(await db.instance.count({ where: { userId: f.user.id } }), 0);
@@ -170,10 +173,10 @@ test("verified webhook settles once without double wallet credit; wrong amounts 
       where: { orderId: o.id },
       data: { providerId: crypto.randomUUID() },
     });
-    await assert.rejects(credit(p.id, "stripe", 1001, p.providerId!));
+    await assert.rejects(credit(p.id, "flutterwave", 1001, p.providerId!));
     await Promise.all(
       Array.from({ length: 4 }, () =>
-        credit(p.id, "stripe", 1000, p.providerId!),
+        credit(p.id, "flutterwave", 1000, p.providerId!),
       ),
     );
     assert.equal(
@@ -196,7 +199,7 @@ test("verified webhook settles once without double wallet credit; wrong amounts 
 });
 test("cancelled order releases stock once; late payment credits wallet without delivery", async () => {
   const f = await fixture(),
-    m = await method("crypto");
+    m = await method("nowpayments");
   try {
     const o = await checkout(f.user.id, f.cart(m.id));
     await assert.rejects(cancelUnpaid("wrong-user", o.id));
@@ -210,7 +213,7 @@ test("cancelled order releases stock once; late payment credits wallet without d
       where: { orderId: o.id },
       data: { providerId: crypto.randomUUID() },
     });
-    await credit(p.id, "crypto", 1000, p.providerId!);
+    await credit(p.id, "nowpayments", 1000, p.providerId!);
     assert.equal(
       (await db.user.findUniqueOrThrow({ where: { id: f.user.id } })).wallet,
       11000,
@@ -285,6 +288,152 @@ test("account deletion anonymizes profile and revokes sessions; admin deletion i
     await assert.rejects(deleteAccount("other-admin", f.user.id));
   } finally {
     await f.cleanup();
+  }
+});
+test("paid orders autoassign ready inventory once; custom hardware stays pending", async () => {
+  const f = await fixture();
+  try {
+    const server = await db.inventoryServer.create({
+      data: {
+        planId: f.plan.id,
+        label: "ready",
+        ip: "192.0.2.99",
+        port: 3389,
+        username: "DOMAIN\\user",
+        secret: encrypt("password"),
+      },
+    });
+    const o = await checkout(f.user.id, f.cart());
+    assert.equal(o.status, "COMPLETE");
+    const i = await db.instance.findFirstOrThrow({
+      where: { orderItem: { orderId: o.id } },
+    });
+    assert.equal(i.status, "ACTIVE");
+    assert.equal(i.inventoryId, server.id);
+    assert.equal(decrypt(i.secret!), "password");
+    const second = await checkout(f.user.id, f.cart());
+    assert.equal(second.status, "PENDING");
+    await db.inventoryServer.create({
+      data: {
+        planId: f.plan.id,
+        label: "base",
+        ip: "192.0.2.98",
+        username: "Administrator",
+        secret: encrypt("password"),
+      },
+    });
+    const custom = f.cart();
+    custom.lines[0].ram = 8;
+    assert.equal((await checkout(f.user.id, custom)).status, "PENDING");
+    assert.equal(
+      await db.inventoryServer.count({
+        where: { planId: f.plan.id, state: "AVAILABLE" },
+      }),
+      1,
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+test("gateway checkout and verified callbacks settle once; invalid signatures and amounts do not settle", async () => {
+  const originalFetch = globalThis.fetch;
+  process.env.APP_URL = "https://example.invalid";
+  process.env.FLUTTERWAVE_SECRET_KEY = "test-key";
+  process.env.FLUTTERWAVE_WEBHOOK_SECRET = "test-secret";
+  process.env.NOWPAYMENTS_API_KEY = "test-key";
+  process.env.NOWPAYMENTS_IPN_SECRET = "test-secret";
+  for (const provider of ["flutterwave", "nowpayments"]) {
+    const f = await fixture();
+    let creations = 0,
+      validAmount = false;
+    try {
+      const p = await db.payment.create({
+        data: {
+          userId: f.user.id,
+          cents: 1000,
+          provider,
+          requestKey: crypto.randomUUID(),
+        },
+      });
+      globalThis.fetch = async (_url, init) => {
+        if (init?.method === "POST") {
+          creations++;
+          return Response.json(
+            provider === "flutterwave"
+              ? {
+                  status: "success",
+                  data: { link: "https://checkout.flutterwave.com/test" },
+                }
+              : {
+                  id: 123,
+                  invoice_url: "https://nowpayments.io/payment/?iid=123",
+                },
+          );
+        }
+        return Response.json(
+          provider === "flutterwave"
+            ? {
+                status: "success",
+                data: {
+                  id: 456,
+                  tx_ref: p.id,
+                  status: "successful",
+                  currency: "USD",
+                  amount: validAmount ? 10 : 9,
+                },
+              }
+            : {
+                payment_id: 456,
+                invoice_id: 123,
+                order_id: p.id,
+                payment_status: "finished",
+                price_currency: "usd",
+                price_amount: 10,
+                actually_paid: validAmount ? "0.1" : "0.09",
+                pay_amount: "0.1",
+              },
+        );
+      };
+      assert.ok((await checkoutPayment(p.id)).url);
+      assert.ok((await checkoutPayment(p.id)).url);
+      assert.equal(creations, 1);
+      const event =
+        provider === "flutterwave"
+          ? { event: "charge.completed", data: { id: 456 } }
+          : { payment_id: 456 };
+      const headers: Record<string, string> =
+        provider === "flutterwave"
+          ? { "verif-hash": "test-secret" }
+          : { "x-nowpayments-sig": nowSignature(event, "test-secret") };
+      const request = (signed = true) =>
+        new Request(`https://example.invalid/api/webhooks/${provider}`, {
+          method: "POST",
+          headers: signed ? headers : {},
+          body: JSON.stringify(event),
+        });
+      assert.equal((await webhook(request(false))).status, 401);
+      assert.equal((await webhook(request())).status, 400);
+      assert.equal(
+        (await db.payment.findUniqueOrThrow({ where: { id: p.id } })).status,
+        "PENDING",
+      );
+      validAmount = true;
+      assert.equal((await webhook(request())).status, 200);
+      assert.equal((await webhook(request())).status, 200);
+      assert.equal(
+        (await db.user.findUniqueOrThrow({ where: { id: f.user.id } })).wallet,
+        11000,
+      );
+      assert.equal(
+        await db.ledger.count({
+          where: { userId: f.user.id, kind: "FUNDING" },
+        }),
+        1,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      await f.cleanup();
+    }
   }
 });
 test.after(() => db.$disconnect());

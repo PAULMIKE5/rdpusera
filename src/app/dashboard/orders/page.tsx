@@ -80,7 +80,7 @@ export default function Orders() {
               <>
                 <p className="muted whitespace-pre-wrap my-4">
                   {o.paymentInstructions ||
-                    "Complete payment to join the manual delivery queue."}
+                    "Complete payment for inventory assignment or pending delivery."}
                 </p>
                 <div className="flex gap-3">
                   <button
