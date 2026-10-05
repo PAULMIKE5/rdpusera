@@ -1,0 +1,5 @@
+[build.environment]
+  # Turbopack's persistent build cache records server-side env var values.
+  # It is restored between builds but never deployed, so skip it during
+  # secrets scanning while still scanning the rest of the repo and output.
+  SECRETS_SCAN_OMIT_PATHS = ".netlify/.next/cache"
