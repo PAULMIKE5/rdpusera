@@ -1,3 +1,13 @@
+# Current release: manual RDP delivery
+
+The root URL is now a public plan catalog. `/dashboard` is the customer account area, `/dashboard/settings` manages profile/password/sessions, `/cart` is checkout, and `/admin` manages orders, plans, locations, payments, encrypted integration keys, customers and server inventory.
+
+**Upgrading the existing Netlify site:** follow [the browser-only upgrade guide](docs/NETLIFY-UPGRADE.md). Apply the new SQL migration before deploying this release. Payment methods start disabled until an administrator configures them. New paid orders wait for manual credentials and are never automatically provisioned.
+
+The original setup notes below describe legacy automatic provisioning. Their auto-provisioning and immediate-term behavior applies only to existing AUTO instances. New manual delivery does not require PROVISIONER_URL or a worker. The current build uses Webpack. Current verification and migration details are in the upgrade guide and CI workflow.
+
+---
+
 # GlobalRDP Hub
 
 A complete Next.js / React / TypeScript source project for a prepaid RDP & VPS storefront. Tailwind and Lucide provide the dark dashboard. PostgreSQL and Prisma own sessions, inventory, instances, money, audit records, and durable jobs.

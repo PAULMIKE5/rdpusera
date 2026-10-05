@@ -18,13 +18,9 @@ if (!env.success) {
 if (process.env.NODE_ENV === "production") {
   if (
     process.env.DEMO_MODE === "true" ||
-    !env.data.APP_URL.startsWith("https://") ||
-    !process.env.PROVISIONER_URL?.startsWith("https://") ||
-    !process.env.PROVISIONER_TOKEN
+    !env.data.APP_URL.startsWith("https://")
   ) {
-    console.error(
-      "Production requires HTTPS APP_URL, HTTPS PROVISIONER_URL, PROVISIONER_TOKEN and DEMO_MODE=false",
-    );
+    console.error("Production requires HTTPS APP_URL and DEMO_MODE=false");
     process.exit(1);
   }
   if (/replace-with/.test(env.data.JWT_SECRET)) {

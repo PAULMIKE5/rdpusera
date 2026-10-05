@@ -12,7 +12,11 @@ process.on("SIGINT", () => {
 });
 async function tick() {
   const expired = await db.instance.findMany({
-    where: { status: "ACTIVE", expiresAt: { lte: new Date() } },
+    where: {
+      status: "ACTIVE",
+      controlMode: "AUTO",
+      expiresAt: { lte: new Date() },
+    },
     take: 50,
   });
   for (const i of expired)
@@ -94,7 +98,7 @@ async function tick() {
 }
 async function metrics() {
   const rows = await db.instance.findMany({
-    where: { status: "ACTIVE" },
+    where: { status: "ACTIVE", controlMode: "AUTO" },
     take: 500,
   });
   for (const i of rows) {

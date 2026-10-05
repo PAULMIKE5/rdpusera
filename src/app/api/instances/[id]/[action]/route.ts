@@ -19,6 +19,7 @@ export const POST = route(async (req) => {
       });
       return json({
         ip: i.ip,
+        port: i.port,
         username: i.username,
         password: decrypt(i.secret),
       });
@@ -37,6 +38,7 @@ export const POST = route(async (req) => {
     await tx.job.create({
       data: {
         instanceId: id,
+        state: i.controlMode === "MANUAL" ? "MANUAL_PENDING" : "PENDING",
         action: action === "restart" ? "RESTART" : "TERMINATE",
       },
     });
@@ -63,7 +65,7 @@ export const GET = route(async (req) => {
     throw new HttpError(409, "RDP unavailable");
   const clean = (v: string) => v.replace(/[\r\n]/g, "");
   return new Response(
-    `full address:s:${clean(i.ip)}\r\nusername:s:${clean(i.username ?? "Administrator")}\r\nprompt for credentials:i:1\r\nauthentication level:i:2\r\n`,
+    `full address:s:${clean(i.ip)}:${i.port}\r\nusername:s:${clean(i.username ?? "Administrator")}\r\nprompt for credentials:i:1\r\nauthentication level:i:2\r\n`,
     {
       headers: {
         "Content-Type": "application/x-rdp",

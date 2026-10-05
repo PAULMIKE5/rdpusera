@@ -1,22 +1,15 @@
-# Verification — 2026-10-04
+# Manual delivery upgrade verification — 2026-10-05
 
-## Passed in the build environment
+Passed locally:
+- Next.js optimized production build using Webpack, including TypeScript checks.
+- Seven unit tests: pricing, credential encryption/tampering, Origin checks, demo guard, cart limits, checkout fingerprints, delivery input validation.
+- Prisma schema validation and generated client.
+- Both SQL migrations applied successfully to an isolated in-memory PGlite PostgreSQL engine.
+- Git diff whitespace validation.
 
-- Prisma Client generation (6.19.3).
-- Next.js 16.3.8 optimized production build, including TypeScript validation and page generation.
-- Four Node test-runner tests: integer pricing and bounds; credential encryption/tampering; request Origin enforcement; demo mode disabled in production.
-- `npm audit --omit=dev --audit-level=high`: zero vulnerabilities reported at packaging time. This is a point-in-time dependency scan, not a security certification.
+Not verified:
+- Seven Prisma integration tests are supplied, but their local run was blocked before exercising behavior: Prisma could not connect to the isolated database socket. The GitHub Actions workflow supplies PostgreSQL 16 and runs the tests once repository writes are enabled.
+- Browser visual/interaction QA, real payment delivery and actual provider operations.
+- Live Neon migration and Netlify deployment have not been performed.
 
-## Supplied but not executed here
-
-- Three PostgreSQL integration tests covering concurrent callback idempotency, concurrent overdraft prevention, and checkout replay / inventory rollback.
-- GitHub Actions starts a dedicated PostgreSQL service and runs those tests automatically when the project is pushed.
-
-## Not verified
-
-- PostgreSQL migration application and full browser-to-database flows: no PostgreSQL server or Docker was available in this environment.
-- Browser visual/accessibility checks and responsive interaction testing.
-- Live Stripe delivery, crypto adapter behavior, and cloud provisioning. These require your accounts, credentials, and provider-specific adapters.
-- Docker image execution, cloud deployment, scale/load behavior, and independent security assessment.
-
-The source is an implementation deliverable, not a claim that a live production service has been deployed or certified. README.md explains setup, supported behavior, adapter contracts, operational limits, and launch requirements.
+Publication: the connected GitHub integration returned HTTP 403 (Resource not accessible by integration) while creating the source tree. No feature branch, commit or PR was published remotely. The complete source changes remain in the local feature checkout. See docs/NETLIFY-UPGRADE.md for migration and deployment instructions.

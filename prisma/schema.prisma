@@ -1,111 +1,217 @@
 generator client {
- provider = "prisma-client-js"
+  provider = "prisma-client-js"
 }
+
 datasource db {
- provider = "postgresql"
- url = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
+
 model User {
- id String @id @default(cuid())
- email String @unique
- password String
- role String @default("USER")
- wallet Int @default(0)
- disabled Boolean @default(false)
- createdAt DateTime @default(now())
- sessions Session[]
- instances Instance[]
- payments Payment[]
- ledger Ledger[]
+  id        String     @id @default(cuid())
+  email     String     @unique
+  password  String
+  role      String     @default("USER")
+  wallet    Int        @default(0)
+  disabled  Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  deletedAt DateTime?
+  name      String     @default("")
+  orders    Order[]
+  sessions  Session[]
+  instances Instance[]
+  payments  Payment[]
+  ledger    Ledger[]
 }
+
 model Session {
- id String @id
- userId String
- user User @relation(fields:[userId], references:[id], onDelete:Cascade)
- expiresAt DateTime
- @@index([expiresAt])
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+
+  @@index([expiresAt])
 }
+
 model Plan {
- id String @id @default(cuid())
- name String
- region String
- location String
- os String
- cpu Int
- ram Int
- disk Int
- baseCents Int
- stock Int
- enabled Boolean @default(true)
- instances Instance[]
+  id           String            @id @default(cuid())
+  name         String
+  region       String
+  location     String
+  os           String
+  cpu          Int
+  ram          Int
+  disk         Int
+  baseCents    Int
+  stock        Int
+  enabled      Boolean           @default(true)
+  locationId   String?
+  siteLocation Location?         @relation(fields: [locationId], references: [id])
+  inventory    InventoryServer[]
+  orderItems   OrderItem[]
+  instances    Instance[]
 }
+
 model Instance {
- id String @id @default(cuid())
- userId String
- user User @relation(fields:[userId],references:[id])
- planId String
- plan Plan @relation(fields:[planId],references:[id])
- cpu Int
- ram Int
- disk Int
- priceCents Int
- status String @default("PROVISIONING")
- requestKey String
- ip String?
- username String?
- secret String?
- providerId String?
- uptimeSeconds Int @default(0)
- bandwidthBytes BigInt @default(0)
- createdAt DateTime @default(now())
- expiresAt DateTime
- jobs Job[]
- @@unique([userId,requestKey])
- @@index([status,expiresAt])
+  id             String           @id @default(cuid())
+  userId         String
+  user           User             @relation(fields: [userId], references: [id])
+  planId         String
+  plan           Plan             @relation(fields: [planId], references: [id])
+  cpu            Int
+  ram            Int
+  disk           Int
+  priceCents     Int
+  status         String           @default("PROVISIONING")
+  requestKey     String
+  ip             String?
+  username       String?
+  secret         String?
+  providerId     String?
+  controlMode    String           @default("AUTO")
+  inventoryId    String?          @unique
+  inventory      InventoryServer? @relation(fields: [inventoryId], references: [id])
+  port           Int              @default(3389)
+  orderItemId    String?          @unique
+  orderItem      OrderItem?       @relation(fields: [orderItemId], references: [id])
+  uptimeSeconds  Int              @default(0)
+  bandwidthBytes BigInt           @default(0)
+  createdAt      DateTime         @default(now())
+  expiresAt      DateTime
+  jobs           Job[]
+
+  @@unique([userId, requestKey])
+  @@index([status, expiresAt])
 }
+
 model Ledger {
- id String @id @default(cuid())
- userId String
- user User @relation(fields:[userId],references:[id])
- amount Int
- kind String
- reference String @unique
- createdAt DateTime @default(now())
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  amount    Int
+  kind      String
+  reference String   @unique
+  createdAt DateTime @default(now())
 }
+
 model Payment {
- id String @id @default(cuid())
- userId String
- user User @relation(fields:[userId],references:[id])
- cents Int
- provider String
- providerId String? @unique
- status String @default("PENDING")
- requestKey String
- createdAt DateTime @default(now())
- @@unique([userId,requestKey])
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  cents       Int
+  provider    String
+  providerId  String?  @unique
+  checkoutUrl String?
+  orderId     String?  @unique
+  order       Order?   @relation(fields: [orderId], references: [id])
+  status      String   @default("PENDING")
+  requestKey  String
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, requestKey])
 }
+
 model Job {
- id String @id @default(cuid())
- instanceId String
- instance Instance @relation(fields:[instanceId],references:[id])
- action String
- state String @default("PENDING")
- attempts Int @default(0)
- runAt DateTime @default(now())
- lockedUntil DateTime?
- error String?
- createdAt DateTime @default(now())
- @@index([state,runAt])
+  id          String    @id @default(cuid())
+  instanceId  String
+  instance    Instance  @relation(fields: [instanceId], references: [id])
+  action      String
+  state       String    @default("PENDING")
+  attempts    Int       @default(0)
+  runAt       DateTime  @default(now())
+  lockedUntil DateTime?
+  error       String?
+  createdAt   DateTime  @default(now())
+
+  @@index([state, runAt])
 }
+
 model RateLimit {
- key String @id
- count Int
- expiresAt DateTime
+  key       String   @id
+  count     Int
+  expiresAt DateTime
 }
+
 model Audit {
- id String @id @default(cuid())
- actorId String
- action String
- targetId String
- createdAt DateTime @default(now())
+  id        String   @id @default(cuid())
+  actorId   String
+  action    String
+  targetId  String
+  createdAt DateTime @default(now())
+}
+
+model Location {
+  id      String  @id @default(cuid())
+  name    String
+  region  String
+  enabled Boolean @default(true)
+  plans   Plan[]
+
+  @@unique([region, name])
+}
+
+model PaymentMethod {
+  id           String  @id @default(cuid())
+  label        String
+  provider     String
+  instructions String  @default("")
+  enabled      Boolean @default(false)
+}
+
+model SystemKey {
+  name       String   @id
+  ciphertext String
+  updatedAt  DateTime @updatedAt
+}
+
+model Order {
+  id                  String      @id @default(cuid())
+  userId              String
+  user                User        @relation(fields: [userId], references: [id])
+  status              String      @default("AWAITING_PAYMENT")
+  totalCents          Int
+  requestKey          String
+  requestHash         String
+  method              String
+  paymentInstructions String      @default("")
+  createdAt           DateTime    @default(now())
+  paidAt              DateTime?
+  completedAt         DateTime?
+  payment             Payment?
+  items               OrderItem[]
+
+  @@unique([userId, requestKey])
+  @@index([status, createdAt])
+}
+
+model OrderItem {
+  id       String    @id @default(cuid())
+  orderId  String
+  order    Order     @relation(fields: [orderId], references: [id])
+  planId   String
+  plan     Plan      @relation(fields: [planId], references: [id])
+  name     String
+  location String
+  os       String
+  cpu      Int
+  ram      Int
+  disk     Int
+  cents    Int
+  instance Instance?
+}
+
+model InventoryServer {
+  id        String    @id @default(cuid())
+  planId    String
+  plan      Plan      @relation(fields: [planId], references: [id])
+  label     String
+  ip        String
+  port      Int       @default(3389)
+  username  String
+  secret    String
+  state     String    @default("AVAILABLE")
+  createdAt DateTime  @default(now())
+  instance  Instance?
+
+  @@unique([ip, port])
 }

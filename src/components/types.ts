@@ -1,0 +1,77 @@
+export type Plan = {
+  id: string;
+  name: string;
+  region: string;
+  location: string;
+  locationId: string | null;
+  os: string;
+  cpu: number;
+  ram: number;
+  disk: number;
+  baseCents: number;
+  stock: number;
+  enabled: boolean;
+};
+export type CartLine = {
+  planId: string;
+  name: string;
+  cpu: number;
+  ram: number;
+  disk: number;
+  quantity: number;
+  estimate: number;
+};
+export type Me = {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  wallet: number;
+  demo: boolean;
+  ledger: { id: string; kind: string; amount: number; createdAt: string }[];
+};
+export type Instance = {
+  id: string;
+  userId: string;
+  planId: string;
+  plan: Plan;
+  cpu: number;
+  ram: number;
+  disk: number;
+  status: string;
+  ip: string | null;
+  port: number;
+  username: string | null;
+  expiresAt: string;
+  controlMode: string;
+  uptimeSeconds: number;
+  bandwidthBytes: string;
+  user?: { email: string };
+};
+export type Order = {
+  id: string;
+  status: string;
+  totalCents: number;
+  method: string;
+  paymentInstructions: string;
+  createdAt: string;
+  user?: { email: string };
+  items: {
+    id: string;
+    name: string;
+    location: string;
+    os: string;
+    cpu: number;
+    ram: number;
+    disk: number;
+    cents: number;
+    instance: { id: string; status: string; planId?: string } | null;
+  }[];
+};
+export type Method = {
+  id: string;
+  label: string;
+  provider: string;
+  instructions: string;
+  enabled?: boolean;
+};

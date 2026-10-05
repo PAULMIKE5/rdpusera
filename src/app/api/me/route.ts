@@ -11,6 +11,7 @@ export const GET = route(async () => {
   return json({
     id: user.id,
     email: user.email,
+    name: user.name,
     role: user.role,
     wallet: user.wallet,
     demo: demo(),

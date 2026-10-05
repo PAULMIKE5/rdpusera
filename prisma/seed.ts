@@ -15,6 +15,11 @@ async function main() {
       "Ubuntu 24.04",
     ].entries()) {
       const id = `seed-${region}-${n}`;
+      const loc = await db.location.upsert({
+        where: { region_name: { region, name: location } },
+        create: { region, name: location },
+        update: {},
+      });
       await db.plan.upsert({
         where: { id },
         update: {},
@@ -23,6 +28,7 @@ async function main() {
           name: n === 2 ? "Linux Compute" : "Windows Performance",
           region,
           location,
+          locationId: loc.id,
           os,
           cpu: 2,
           ram: 4,

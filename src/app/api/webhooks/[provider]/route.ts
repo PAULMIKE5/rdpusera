@@ -1,3 +1,4 @@
+import { systemKey } from "@/lib/config";
 import Stripe from "stripe";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
@@ -10,13 +11,13 @@ export const POST = route(async (req) => {
     throw new HttpError(413, "Payload too large");
   const provider = new URL(req.url).pathname.split("/").pop();
   if (provider === "stripe") {
-    const stripe = new Stripe(required("STRIPE_SECRET_KEY"));
+    const stripe = new Stripe(await systemKey("STRIPE_SECRET_KEY"));
     let event: Stripe.Event;
     try {
       event = stripe.webhooks.constructEvent(
         raw,
         req.headers.get("stripe-signature") ?? "",
-        required("STRIPE_WEBHOOK_SECRET"),
+        await systemKey("STRIPE_WEBHOOK_SECRET"),
       );
     } catch {
       throw new HttpError(400, "Invalid signature");
@@ -47,7 +48,10 @@ export const POST = route(async (req) => {
     Math.abs(Date.now() / 1000 - Number(timestamp)) > 300
   )
     throw new HttpError(400, "Expired signature");
-  const expected = createHmac("sha256", required("CRYPTO_WEBHOOK_SECRET"))
+  const expected = createHmac(
+    "sha256",
+    await systemKey("CRYPTO_WEBHOOK_SECRET"),
+  )
     .update(`${timestamp}.${raw}`)
     .digest();
   const sig = Buffer.from(req.headers.get("x-webhook-signature") ?? "", "hex");
