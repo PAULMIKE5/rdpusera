@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { profileInput } from "@/lib/registration";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { auth, origin, limit, HttpError } from "@/lib/security";
@@ -12,7 +13,8 @@ export const POST = route(async (req) => {
     .discriminatedUnion("action", [
       z.object({
         action: z.literal("profile"),
-        name: z.string().trim().max(80),
+        name: profileInput.shape.name,
+        countryCode: profileInput.shape.countryCode,
         email: z
           .string()
           .email()
@@ -37,13 +39,18 @@ export const POST = route(async (req) => {
     .parse(await body(req));
   if (!(await bcrypt.compare(s.currentPassword, user.password)))
     throw new HttpError(403, "Current password is incorrect");
+  if (s.action === "profile" && s.email !== user.email)
+    throw new HttpError(
+      400,
+      "Email changes require verification. Contact support.",
+    );
   const password =
     s.action === "password" ? await bcrypt.hash(s.password, 12) : null;
   await atomic(async (tx) => {
     if (s.action === "profile")
       await tx.user.update({
         where: { id: user.id },
-        data: { name: s.name, email: s.email },
+        data: { name: s.name, countryCode: s.countryCode },
       });
     if (password)
       await tx.user.update({ where: { id: user.id }, data: { password } });

@@ -12,6 +12,7 @@ export const GET = route(async () => {
     id: user.id,
     email: user.email,
     name: user.name,
+    countryCode: user.countryCode,
     role: user.role,
     wallet: user.wallet,
     demo: demo(),

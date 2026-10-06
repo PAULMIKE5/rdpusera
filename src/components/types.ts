@@ -29,6 +29,7 @@ export type Me = {
   id: string;
   email: string;
   name: string;
+  countryCode: string | null;
   role: string;
   wallet: number;
   demo: boolean;
@@ -56,6 +57,7 @@ export type Order = {
   id: string;
   status: string;
   totalCents: number;
+  payment?: { id: string; status: string; gatewayStatus: string | null } | null;
   method: string;
   paymentInstructions: string;
   createdAt: string;

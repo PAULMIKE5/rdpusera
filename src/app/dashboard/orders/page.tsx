@@ -65,8 +65,8 @@ export default function Orders() {
             <ul className="my-5 space-y-2">
               {o.items.map((i) => (
                 <li key={i.id} className="text-sm">
-                  {i.name} · {i.location} · {i.os} · {i.cpu} vCPU / {i.ram} GB / {i.disk}{" "}
-                  GB · {money(i.cents)}{" "}
+                  {i.name} · {i.location} · {i.os} · {i.cpu} vCPU / {i.ram} GB /{" "}
+                  {i.disk} GB · {money(i.cents)}{" "}
                   {i.instance?.status === "ACTIVE" && (
                     <Link href="/dashboard/instances" className="text-lime-300">
                       View access
@@ -82,7 +82,21 @@ export default function Orders() {
                   {o.paymentInstructions ||
                     "Complete payment for inventory assignment or pending delivery."}
                 </p>
-                <div className="flex gap-3">
+                {o.payment?.gatewayStatus && (
+                  <p className="muted text-sm my-3">
+                    Payment provider: {o.payment.gatewayStatus}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-3">
+                  {o.payment &&
+                    ["flutterwave", "nowpayments"].includes(o.method) && (
+                      <Link
+                        className="secondary"
+                        href={`/payments/return?payment=${o.payment.id}`}
+                      >
+                        Check payment status
+                      </Link>
+                    )}
                   <button
                     disabled={busy}
                     className="primary"

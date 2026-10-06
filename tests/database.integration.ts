@@ -65,6 +65,7 @@ async function fixture(stock = 10, wallet = 10000) {
     }),
     async cleanup() {
       await db.audit.deleteMany({});
+      await db.conversation.deleteMany({ where: { userId: user.id } });
       await db.job.deleteMany({ where: { instance: { userId: user.id } } });
       await db.instance.deleteMany({ where: { userId: user.id } });
       await db.inventoryServer.deleteMany({ where: { planId: plan.id } });
@@ -511,6 +512,8 @@ test("registration requires email OTP, rejects guesses, limits resend, and consu
   };
   try {
     const c = await registerAccount({
+      name: "Test Customer",
+      countryCode: "NG",
       email,
       password: "a-password-long-enough",
     });
@@ -566,6 +569,8 @@ test("OTP attempt exhaustion, expiry and resend invalidate older codes", async (
   };
   try {
     const c = await registerAccount({
+      name: "Test Customer",
+      countryCode: "NG",
       email,
       password: "another-long-password",
     });
@@ -609,7 +614,12 @@ test("email delivery failure never activates the account or returns a code", asy
     Response.json({ error: "mail unavailable" }, { status: 503 });
   try {
     await assert.rejects(
-      registerAccount({ email, password: "another-long-password" }),
+      registerAccount({
+        name: "Test Customer",
+        countryCode: "NG",
+        email,
+        password: "another-long-password",
+      }),
       /could not send/,
     );
     const u = await db.user.findUniqueOrThrow({ where: { email } });
@@ -625,3 +635,367 @@ test("email delivery failure never activates the account or returns a code", asy
   }
 });
 test.after(() => db.$disconnect());
+
+import { adminOperation, assignServer } from "../src/lib/admin-operations";
+import { sendChat, chatUser } from "../src/lib/chat";
+import {
+  verifyNowPayment,
+  reconcilePayment,
+} from "../src/lib/payment-verification";
+const adminPassword = "not-checked-in-service-layer";
+test("admin balance updates are idempotent, audited and reject stale wallet writes", async () => {
+  const f = await fixture();
+  try {
+    const action = {
+      action: "balance" as const,
+      id: f.user.id,
+      expectedWallet: 10000,
+      wallet: 12000,
+      reason: "Support account credit",
+      requestKey: crypto.randomUUID(),
+      password: adminPassword,
+    };
+    await adminOperation("test-admin", action);
+    await adminOperation("test-admin", action);
+    assert.equal(
+      (await db.user.findUniqueOrThrow({ where: { id: f.user.id } })).wallet,
+      12000,
+    );
+    assert.equal(
+      await db.ledger.count({
+        where: { userId: f.user.id, kind: "ADMIN_ADJUSTMENT" },
+      }),
+      1,
+    );
+    await assert.rejects(
+      adminOperation("test-admin", {
+        ...action,
+        requestKey: crypto.randomUUID(),
+        wallet: 15000,
+      }),
+      /Balance changed/,
+    );
+    assert.equal(
+      await db.audit.count({
+        where: { action: "ADMIN_balance", targetId: f.user.id },
+      }),
+      1,
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+test("manual transaction correction posts only a delta and deletion never changes money", async () => {
+  const f = await fixture();
+  try {
+    await adminOperation("test-admin", {
+      action: "transactionCreate",
+      userId: f.user.id,
+      cents: 500,
+      notes: "Goodwill credit",
+      requestKey: crypto.randomUUID(),
+      password: adminPassword,
+    });
+    const p = await db.payment.findFirstOrThrow({
+      where: { userId: f.user.id },
+    });
+    const edit = {
+      action: "transactionEdit" as const,
+      id: p.id,
+      cents: 300,
+      notes: "Correct amount",
+      version: 0,
+      password: adminPassword,
+    };
+    await adminOperation("test-admin", edit);
+    assert.equal(
+      (await db.user.findUniqueOrThrow({ where: { id: f.user.id } })).wallet,
+      10300,
+    );
+    await assert.rejects(
+      adminOperation("test-admin", edit),
+      /Transaction changed/,
+    );
+    await adminOperation("test-admin", {
+      action: "transactionDelete",
+      id: p.id,
+      reason: "Remove from current view",
+      password: adminPassword,
+    });
+    assert.ok(
+      (await db.payment.findUniqueOrThrow({ where: { id: p.id } })).deletedAt,
+    );
+    assert.equal(
+      (await db.user.findUniqueOrThrow({ where: { id: f.user.id } })).wallet,
+      10300,
+    );
+    await adminOperation("test-admin", {
+      action: "transactionRestore",
+      id: p.id,
+      reason: "Restore record",
+      password: adminPassword,
+    });
+    assert.equal(
+      (await db.payment.findUniqueOrThrow({ where: { id: p.id } })).deletedAt,
+      null,
+    );
+    await assert.rejects(
+      adminOperation("test-admin", {
+        action: "transactionCreate",
+        userId: f.user.id,
+        cents: -20000,
+        notes: "Excessive debit",
+        requestKey: crypto.randomUUID(),
+        password: adminPassword,
+      }),
+    );
+    const p2 = await db.payment.create({
+      data: {
+        userId: f.user.id,
+        cents: 100,
+        provider: "flutterwave",
+        status: "PAID",
+        requestKey: crypto.randomUUID(),
+      },
+    });
+    await assert.rejects(
+      adminOperation("test-admin", { ...edit, id: p2.id, cents: 500 }),
+      /Provider payment amounts are fixed/,
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+test("order deletion cancels unpaid stock once and preserves late-payment reconciliation", async () => {
+  const f = await fixture();
+  const m = await method("flutterwave");
+  try {
+    const o = await checkout(f.user.id, f.cart(m.id));
+    const p = await db.payment.findUniqueOrThrow({ where: { orderId: o.id } });
+    await db.payment.update({
+      where: { id: p.id },
+      data: { providerId: p.id },
+    });
+    const action = {
+      action: "orderDelete" as const,
+      id: o.id,
+      reason: "Customer cancelled order",
+      password: adminPassword,
+    };
+    await adminOperation("test-admin", action);
+    await adminOperation("test-admin", action);
+    assert.equal(
+      (await db.plan.findUniqueOrThrow({ where: { id: f.plan.id } })).stock,
+      10,
+    );
+    await credit(p.id, "flutterwave", 1000, p.id, "flutterwave:test-archive");
+    assert.equal(
+      (await db.user.findUniqueOrThrow({ where: { id: f.user.id } })).wallet,
+      11000,
+    );
+    assert.equal(await db.instance.count({ where: { userId: f.user.id } }), 0);
+    await adminOperation("test-admin", { ...action, action: "orderRestore" });
+    const restored = await db.order.findUniqueOrThrow({ where: { id: o.id } });
+    assert.equal(restored.status, "CANCELLED");
+    assert.equal(restored.deletedAt, null);
+  } finally {
+    await f.cleanup();
+    await db.paymentMethod.delete({ where: { id: m.id } });
+  }
+});
+test("pending payments cannot be hidden and undelivered paid orders cannot be deleted", async () => {
+  const f = await fixture();
+  try {
+    const p = await db.payment.create({
+      data: {
+        userId: f.user.id,
+        cents: 100,
+        provider: "nowpayments",
+        requestKey: crypto.randomUUID(),
+      },
+    });
+    await assert.rejects(
+      adminOperation("test-admin", {
+        action: "transactionDelete",
+        id: p.id,
+        reason: "Attempt deletion",
+        password: adminPassword,
+      }),
+      /Reconcile/,
+    );
+    const o = await checkout(f.user.id, f.cart());
+    await assert.rejects(
+      adminOperation("test-admin", {
+        action: "orderDelete",
+        id: o.id,
+        reason: "Attempt deletion",
+        password: adminPassword,
+      }),
+      /Deliver or resolve/,
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+test("direct assignment claims inventory once, uses encrypted credentials, and sends a safe notification", async () => {
+  const f = await fixture();
+  try {
+    const inventory = await db.inventoryServer.create({
+      data: {
+        planId: f.plan.id,
+        label: "Ready",
+        countryCode: "US",
+        os: "Windows",
+        ip: "192.0.2.123",
+        port: 3389,
+        username: "Administrator",
+        secret: encrypt("private-server-password"),
+      },
+    });
+    const data = {
+      userId: f.user.id,
+      planId: f.plan.id,
+      inventoryId: inventory.id,
+      countryCode: "US",
+      os: "Windows" as const,
+      days: 30,
+      reason: "Complimentary server",
+      requestKey: crypto.randomUUID(),
+      password: adminPassword,
+    };
+    const instance = await assignServer("test-admin", data);
+    assert.equal((await assignServer("test-admin", data)).id, instance.id);
+    assert.equal(decrypt(instance.secret!), "private-server-password");
+    assert.equal(instance.priceCents, 0);
+    assert.equal(
+      (await db.plan.findUniqueOrThrow({ where: { id: f.plan.id } })).stock,
+      9,
+    );
+    const messages = await db.chatMessage.findMany({
+      where: { conversation: { userId: f.user.id } },
+    });
+    assert.equal(messages.length, 1);
+    assert.ok(!messages[0].body.includes("private-server-password"));
+    await assert.rejects(
+      assignServer("test-admin", { ...data, requestKey: crypto.randomUUID() }),
+      /Inventory must/,
+    );
+    await assert.rejects(
+      assignServer("test-admin", { ...data, countryCode: "NG" }),
+      /Assignment key already used/,
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+test("support conversations enforce ownership and prevent duplicate or retargeted messages", async () => {
+  const f = await fixture(),
+    other = await fixture();
+  try {
+    const actor = { id: f.user.id, role: "USER" },
+      requestKey = crypto.randomUUID();
+    await assert.rejects(chatUser(actor, other.user.id), /Access denied/);
+    await assert.rejects(
+      sendChat(actor, { userId: other.user.id, body: "Intrusion", requestKey }),
+      /Access denied/,
+    );
+    const first = await sendChat(actor, {
+      body: "Help with my server",
+      requestKey,
+    });
+    assert.equal(
+      (await sendChat(actor, { body: "Help with my server", requestKey })).id,
+      first.id,
+    );
+    await assert.rejects(
+      sendChat(actor, { body: "Different message", requestKey }),
+      /Message key already used/,
+    );
+    const reply = await sendChat(
+      { id: "test-admin", role: "ADMIN" },
+      {
+        userId: f.user.id,
+        body: "I can help.",
+        requestKey: crypto.randomUUID(),
+      },
+    );
+    assert.equal(reply.conversationId, first.conversationId);
+    assert.equal(
+      await db.conversation.count({ where: { userId: other.user.id } }),
+      0,
+    );
+  } finally {
+    await f.cleanup();
+    await other.cleanup();
+  }
+});
+test("crypto early callbacks retain IDs, return verification settles once and rejects another user's payment", async () => {
+  const f = await fixture(),
+    other = await fixture();
+  const original = globalThis.fetch;
+  process.env.NOWPAYMENTS_API_KEY = "test-only-key";
+  try {
+    const p = await db.payment.create({
+      data: {
+        userId: f.user.id,
+        cents: 1000,
+        provider: "nowpayments",
+        providerId: "900",
+        checkoutStarted: true,
+        requestKey: crypto.randomUUID(),
+      },
+    });
+    let status = "confirming";
+    globalThis.fetch = async () =>
+      Response.json({
+        payment_id: 123,
+        invoice_id: 900,
+        order_id: p.id,
+        price_currency: "usd",
+        price_amount: 10,
+        payment_status: status,
+        actually_paid: "0.001",
+        pay_amount: "0.001",
+      });
+    await verifyNowPayment("123");
+    assert.equal(
+      (await db.payment.findUniqueOrThrow({ where: { id: p.id } }))
+        .gatewayPaymentId,
+      "123",
+    );
+    assert.equal(
+      (await db.user.findUniqueOrThrow({ where: { id: f.user.id } })).wallet,
+      10000,
+    );
+    await assert.rejects(
+      reconcilePayment(other.user.id, p.id),
+      /Payment not found/,
+    );
+    status = "finished";
+    assert.equal((await reconcilePayment(f.user.id, p.id)).status, "PAID");
+    await reconcilePayment(f.user.id, p.id);
+    await verifyNowPayment("123");
+    assert.equal(
+      (await db.user.findUniqueOrThrow({ where: { id: f.user.id } })).wallet,
+      11000,
+    );
+    const unrelated = await db.payment.create({
+      data: {
+        userId: other.user.id,
+        cents: 1000,
+        provider: "nowpayments",
+        providerId: "901",
+        checkoutStarted: true,
+        requestKey: crypto.randomUUID(),
+      },
+    });
+    await assert.rejects(
+      reconcilePayment(other.user.id, unrelated.id, "123"),
+      /mismatch/,
+    );
+  } finally {
+    globalThis.fetch = original;
+    await f.cleanup();
+    await other.cleanup();
+  }
+});

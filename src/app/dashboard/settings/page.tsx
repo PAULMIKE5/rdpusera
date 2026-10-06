@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, useWorkspace } from "@/components/workspace";
+import { countries } from "@/lib/countries";
 export default function Settings() {
   const { me, refresh, setNotice } = useWorkspace();
   const [busy, setBusy] = useState(false);
@@ -44,11 +45,29 @@ export default function Settings() {
             <input name="name" defaultValue={me?.name} maxLength={80} />
           </label>
           <label>
+            Country of residence
+            <select
+              name="countryCode"
+              defaultValue={me?.countryCode ?? ""}
+              required
+            >
+              <option value="" disabled>
+                Select your country
+              </option>
+              {countries.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             Email
             <input
               name="email"
               type="email"
               defaultValue={me?.email}
+              readOnly
               required
             />
           </label>

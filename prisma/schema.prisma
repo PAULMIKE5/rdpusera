@@ -20,6 +20,8 @@ model User {
   verification              EmailVerification?
   deletedAt                 DateTime?
   name                      String             @default("")
+  countryCode               String?
+  conversation              Conversation?
   orders                    Order[]
   sessions                  Session[]
   instances                 Instance[]
@@ -109,7 +111,13 @@ model Payment {
   cents           Int
   provider        String
   providerId      String?  @unique
+  notes           String   @default("")
+  deletedAt       DateTime?
+  version         Int      @default(0)
   checkoutUrl     String?
+  gatewayPaymentId String?
+  gatewayStatus    String?
+  checkedAt        DateTime?
   checkoutStarted Boolean  @default(false)
   transactionId   String?  @unique
   orderId         String?  @unique
@@ -147,6 +155,7 @@ model Audit {
   actorId   String
   action    String
   targetId  String
+  details   Json?
   createdAt DateTime @default(now())
 }
 
@@ -183,6 +192,8 @@ model Order {
   requestKey          String
   requestHash         String
   method              String
+  notes               String      @default("")
+  deletedAt           DateTime?
   paymentInstructions String      @default("")
   createdAt           DateTime    @default(now())
   paidAt              DateTime?
@@ -239,4 +250,37 @@ model EmailVerification {
   sentAt    DateTime @default(now())
 
   @@index([expiresAt])
+}
+
+model Conversation {
+  id          String @id @default(cuid())
+  userId      String @unique
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt   DateTime @default(now())
+  adminReadAt DateTime?
+  userReadAt  DateTime?
+  messages    ChatMessage[]
+  @@index([updatedAt])
+}
+model ChatMessage {
+  id             String @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  senderRole     String
+  body           String
+  requestKey     String
+  createdAt      DateTime @default(now())
+  @@unique([senderId, requestKey])
+  @@index([conversationId, createdAt, id])
+}
+model EmailAttempt {
+  id         String @id @default(cuid())
+  purpose    String
+  status     String
+  code       String
+  httpStatus Int?
+  providerId String?
+  createdAt  DateTime @default(now())
+  @@index([createdAt])
 }

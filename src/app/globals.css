@@ -543,3 +543,70 @@ dialog {
     display: flex;
   }
 }
+
+.admin-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.admin-sidebar {
+  padding: 20px 12px;
+  position: sticky;
+  top: 110px;
+}
+.admin-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  text-align: left;
+  border-radius: 10px;
+  color: #9cabb7;
+  font-size: 13px;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.admin-nav:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+.admin-nav.active {
+  background: rgba(196, 241, 138, 0.12);
+  color: #c4f18a;
+}
+.chat-input {
+  width: 100%;
+  background: #0b1218;
+  border: 1px solid #34404c;
+  border-radius: 12px;
+  padding: 12px;
+  color: #e2e8f0;
+  font-size: 16px;
+  resize: vertical;
+}
+@media (max-width: 1023px) {
+  .admin-layout {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .admin-sidebar {
+    position: static;
+    padding: 12px;
+  }
+  .admin-sidebar > p {
+    display: none;
+  }
+  .admin-sidebar nav {
+    display: flex;
+    overflow-x: auto;
+    gap: 5px;
+  }
+  .admin-nav {
+    white-space: nowrap;
+    width: auto;
+    flex-shrink: 0;
+  }
+}

@@ -1,5 +1,7 @@
 # GlobalRDP Hub
 
+**Latest Lightsail release:** follow [the admin, email, chat and payment upgrade guide](docs/ADMIN-OPERATIONS-UPGRADE.md). Apply its additive database migration before deploying the new container.
+
 Next.js marketplace with PostgreSQL/Prisma, authenticated customer and admin dashboards, public fixed-spec plans, cart checkout, Flutterwave fiat payments, NOWPayments cryptocurrency payments and encrypted RDP inventory.
 
 **Existing Netlify deployment:** follow [the email and cart upgrade guide](docs/EMAIL-CART-UPGRADE.md). It includes the Neon SQL file, manual GitHub upload steps, payment keys, webhook URLs and rollout checks. Source changes are not a live deployment.

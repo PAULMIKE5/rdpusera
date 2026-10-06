@@ -53,40 +53,41 @@ export async function issue(userId: string) {
   (await cookies()).set("session", token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    sameSite: "lax",
     path: "/",
     expires: expiresAt,
   });
 }
 export async function auth(admin = false) {
+  const token = (await cookies()).get("session")?.value;
+  if (!token) throw new HttpError(401, "Please sign in");
+  let payload;
   try {
-    const token = (await cookies()).get("session")?.value;
-    if (!token) throw Error();
-    const { payload } = await jwtVerify(token, jwtKey(), {
+    ({ payload } = await jwtVerify(token, jwtKey(), {
       algorithms: ["HS256"],
       issuer: "globalrdp",
       audience: "globalrdp-web",
-    });
-    const s = await db.session.findUnique({
-      where: { id: String(payload.sid) },
-      include: { user: true },
-    });
-    if (
-      !s ||
-      s.userId !== payload.sub ||
-      s.expiresAt < new Date() ||
-      s.user.disabled ||
-      s.user.deletedAt ||
-      (s.user.emailVerificationRequired && !s.user.emailVerifiedAt)
-    )
-      throw Error();
-    if (admin && s.user.role !== "ADMIN")
-      throw new HttpError(403, "Administrator access required");
-    return { user: s.user, sessionId: s.id };
-  } catch (e) {
-    if (e instanceof HttpError) throw e;
-    throw new HttpError(401, "Please sign in");
+    }));
+  } catch {
+    throw new HttpError(401, "Your session expired. Please sign in again.");
   }
+  // Database outages must not masquerade as expired sessions or redirect users to login.
+  const s = await db.session.findUnique({
+    where: { id: String(payload.sid) },
+    include: { user: true },
+  });
+  if (
+    !s ||
+    s.userId !== payload.sub ||
+    s.expiresAt < new Date() ||
+    s.user.disabled ||
+    s.user.deletedAt ||
+    (s.user.emailVerificationRequired && !s.user.emailVerifiedAt)
+  )
+    throw new HttpError(401, "Please sign in");
+  if (admin && s.user.role !== "ADMIN")
+    throw new HttpError(403, "Administrator access required");
+  return { user: s.user, sessionId: s.id };
 }
 export function origin(req: Request) {
   if (req.headers.get("origin") !== new URL(required("APP_URL")).origin)

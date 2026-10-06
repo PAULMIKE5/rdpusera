@@ -40,6 +40,7 @@ export async function deleteAccount(actorId: string, userId: string) {
         409,
         "Settle wallet funds, payments, orders and server instances before deleting this account",
       );
+    await tx.conversation.deleteMany({ where: { userId } });
     await tx.session.deleteMany({ where: { userId } });
     await tx.emailVerification.deleteMany({ where: { userId } });
     await tx.user.update({
@@ -47,6 +48,7 @@ export async function deleteAccount(actorId: string, userId: string) {
       data: {
         email: `deleted-${randomUUID()}@deleted.invalid`,
         name: "Deleted account",
+        countryCode: null,
         password: randomUUID(),
         disabled: true,
         deletedAt: new Date(),

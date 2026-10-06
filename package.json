@@ -13,7 +13,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "node --import tsx prisma/seed.ts",
-    "test:integration": "node --import tsx --test tests/database.integration.ts"
+    "test:integration": "node --import tsx --test tests/database.integration.ts",
+    "test:http": "node --import tsx --test tests/http.integration.ts"
   },
   "keywords": [],
   "author": "",

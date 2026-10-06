@@ -42,3 +42,22 @@ export const POST = route(async (req) => {
   }
   return json(await checkoutPayment(p.id));
 });
+
+export const GET = route(async () => {
+  const { user } = await auth();
+  return json(
+    await db.payment.findMany({
+      where: { userId: user.id, orderId: null, deletedAt: null },
+      select: {
+        id: true,
+        cents: true,
+        provider: true,
+        status: true,
+        gatewayStatus: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "desc" },
+      take: 30,
+    }),
+  );
+});

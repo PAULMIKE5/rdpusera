@@ -58,6 +58,9 @@ export function route(fn: (req: Request) => Promise<Response>) {
         JSON.stringify({
           event: "request_failed",
           type: e instanceof Error ? e.name : "Unknown",
+          ...(e instanceof Prisma.PrismaClientKnownRequestError
+            ? { code: e.code }
+            : {}),
         }),
       );
       return json({ error: "Request failed. Please try again." }, 500);

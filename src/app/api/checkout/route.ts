@@ -6,8 +6,9 @@ export const POST = route(async (req) => {
   origin(req);
   const { user } = await auth();
   await limit(`checkout:${user.id}`, 10);
+  const order = await checkout(user.id, checkoutInput.parse(await body(req)));
   return json(
-    await checkout(user.id, checkoutInput.parse(await body(req))),
+    { id: order.id, status: order.status, totalCents: order.totalCents },
     201,
   );
 });

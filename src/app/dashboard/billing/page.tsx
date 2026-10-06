@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, useWorkspace } from "@/components/workspace";
 import { dollarsToCents } from "@/lib/money";
@@ -6,6 +7,15 @@ import { money } from "@/lib/domain";
 import type { Method } from "@/components/types";
 export default function Billing() {
   const { me, refresh, setNotice } = useWorkspace(),
+    [payments, setPayments] = useState<
+      {
+        id: string;
+        cents: number;
+        provider: string;
+        status: string;
+        gatewayStatus: string | null;
+      }[]
+    >([]),
     [methods, setMethods] = useState<Method[]>([]),
     [amount, setAmount] = useState("50.00"),
     [provider, setProvider] = useState(""),
@@ -18,6 +28,11 @@ export default function Billing() {
         setMethods(available);
         setProvider(available[0]?.provider ?? "");
       })
+      .catch((e) => setNotice(e.message));
+  }, [setNotice]);
+  useEffect(() => {
+    api("funding")
+      .then(setPayments)
       .catch((e) => setNotice(e.message));
   }, [setNotice]);
   useEffect(() => setKey(crypto.randomUUID()), [amount, provider]);
@@ -86,6 +101,34 @@ export default function Billing() {
           </p>
         )}
       </form>
+      {payments.length > 0 && (
+        <section className="panel p-6 mb-6">
+          <h2 className="text-xl mb-4">Recent wallet payments</h2>
+          {payments.map((p) => (
+            <div
+              key={p.id}
+              className="flex flex-wrap justify-between gap-3 border-t border-white/10 py-4"
+            >
+              <div>
+                <strong>{money(p.cents)}</strong>
+                <p className="muted text-sm">
+                  {p.provider} · {p.status}{" "}
+                  {p.gatewayStatus ? `(${p.gatewayStatus})` : ""}
+                </p>
+              </div>
+              {p.status === "PENDING" &&
+                ["flutterwave", "nowpayments"].includes(p.provider) && (
+                  <Link
+                    className="secondary"
+                    href={`/payments/return?payment=${p.id}`}
+                  >
+                    Check payment
+                  </Link>
+                )}
+            </div>
+          ))}
+        </section>
+      )}
       <div className="panel overflow-auto">
         <table className="w-full">
           <thead>

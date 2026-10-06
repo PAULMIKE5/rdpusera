@@ -1,3 +1,15 @@
+import { randomUUID } from "node:crypto";
+import {
+  adminOperation,
+  operationInput,
+  assignmentInput,
+  assignServer,
+} from "@/lib/admin-operations";
+import { registrationInput, registerAccount } from "@/lib/registration";
+import { sendEmail } from "@/lib/email";
+import { mailHelp, senderAddress } from "@/lib/email-provider";
+import { checkout } from "@/lib/orders";
+import { checkoutInput } from "@/lib/checkout-domain";
 import { z } from "zod";
 import {
   countries,
@@ -16,6 +28,38 @@ import { deliveryInput, connectionInput } from "@/lib/checkout-domain";
 import { confirmManualPayment, deleteAccount } from "@/lib/admin";
 export const GET = route(async (req) => {
   await auth(true);
+  const params = new URL(req.url).searchParams;
+  const q = z
+    .string()
+    .max(100)
+    .parse(params.get("q") ?? "");
+  const archived = params.get("archived") === "true";
+  const matchUser = q
+    ? {
+        OR: [
+          { email: { contains: q, mode: "insensitive" as const } },
+          { name: { contains: q, mode: "insensitive" as const } },
+        ],
+      }
+    : {};
+  const userWhere = { deletedAt: null, ...matchUser };
+  const orderWhere = {
+    deletedAt: archived ? { not: null } : null,
+    ...(q ? { OR: [{ id: { contains: q } }, { user: matchUser }] } : {}),
+  };
+  const paymentWhere = {
+    deletedAt: archived ? { not: null } : null,
+    ...(q ? { OR: [{ id: { contains: q } }, { user: matchUser }] } : {}),
+  };
+  if (params.get("lookup") === "users")
+    return json(
+      await db.user.findMany({
+        where: userWhere,
+        select: { id: true, email: true, name: true },
+        take: 30,
+        orderBy: { email: "asc" },
+      }),
+    );
   const page = z.coerce
       .number()
       .int()
@@ -38,6 +82,14 @@ export const GET = route(async (req) => {
     userCount,
     orderCount,
     instanceCount,
+    transactions,
+    transactionCount,
+    pending,
+    totalUsers,
+    available,
+    emailAttempts,
+    audits,
+    trend,
   ] = await Promise.all([
     db.ledger.aggregate({
       where: { kind: "PURCHASE" },
@@ -47,11 +99,12 @@ export const GET = route(async (req) => {
       where: { status: "ACTIVE", expiresAt: { gt: new Date() } },
     }),
     db.user.findMany({
-      where: { deletedAt: null },
+      where: userWhere,
       select: {
         id: true,
         email: true,
         name: true,
+        countryCode: true,
         role: true,
         disabled: true,
         emailVerificationRequired: true,
@@ -67,6 +120,7 @@ export const GET = route(async (req) => {
     db.paymentMethod.findMany(),
     keyStatus(),
     db.order.findMany({
+      where: orderWhere,
       include: {
         user: { select: { email: true } },
         items: {
@@ -80,6 +134,7 @@ export const GET = route(async (req) => {
       take: 50,
     }),
     db.instance.findMany({
+      where: q ? { user: matchUser } : {},
       select: {
         id: true,
         userId: true,
@@ -122,12 +177,40 @@ export const GET = route(async (req) => {
       take: 100,
       orderBy: { createdAt: "desc" },
     }),
+    db.user.count({ where: userWhere }),
+    db.order.count({ where: orderWhere }),
+    db.instance.count({ where: q ? { user: matchUser } : {} }),
+    db.payment.findMany({
+      where: paymentWhere,
+      include: { user: { select: { email: true } } },
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: 50,
+    }),
+    db.payment.count({ where: paymentWhere }),
+    db.order.count({ where: { status: "PENDING", deletedAt: null } }),
     db.user.count({ where: { deletedAt: null } }),
-    db.order.count(),
-    db.instance.count(),
+    db.inventoryServer.count({ where: { state: "AVAILABLE" } }),
+    db.emailAttempt.findMany({ orderBy: { createdAt: "desc" }, take: 20 }),
+    db.audit.findMany({ orderBy: { createdAt: "desc" }, take: 30 }),
+    db.$queryRaw<
+      { day: string; cents: number }[]
+    >`SELECT to_char("createdAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, CAST(-SUM(amount) AS DOUBLE PRECISION) AS cents FROM "Ledger" WHERE kind = 'PURCHASE' AND "createdAt" >= NOW() - INTERVAL '14 days' GROUP BY day ORDER BY day`,
   ]);
   return json({
     revenue: -(revenue._sum.amount ?? 0),
+    transactions,
+    pending,
+    totalUsers,
+    available,
+    emailAttempts: emailAttempts.map((e) => ({
+      ...e,
+      help:
+        mailHelp[e.code] ??
+        "Accepted by Resend; delivery can be checked in the Resend dashboard.",
+    })),
+    audits,
+    trend,
     active,
     users,
     plans,
@@ -141,7 +224,9 @@ export const GET = route(async (req) => {
     page,
     pages: Math.max(
       1,
-      Math.ceil(Math.max(userCount, orderCount, instanceCount) / 50),
+      Math.ceil(
+        Math.max(userCount, orderCount, instanceCount, transactionCount) / 50,
+      ),
     ),
   });
 });
@@ -230,7 +315,86 @@ export const POST = route(async (req) => {
   origin(req);
   const { user } = await auth(true);
   await limit(`admin:${user.id}`, 60);
-  const s = input.parse(await body(req));
+  const raw = await body(req);
+  if (
+    typeof raw.action === "string" &&
+    operationInput.options.some(
+      (schema) => schema.shape.action.value === raw.action,
+    )
+  ) {
+    const op = operationInput.parse(raw);
+    await limit(`admin-sensitive:${user.id}`, 20, 900);
+    if (!(await bcrypt.compare(op.password, user.password)))
+      throw new HttpError(403, "Administrator password is incorrect");
+    await adminOperation(user.id, op);
+    return json({ ok: true });
+  }
+  if (
+    ["assignServer", "emailTest", "userCreate", "orderCreate"].includes(
+      raw.action,
+    )
+  ) {
+    const secret = z.string().max(72).parse(raw.adminPassword);
+    await limit(`admin-sensitive:${user.id}`, 20, 900);
+    if (!(await bcrypt.compare(secret, user.password)))
+      throw new HttpError(403, "Administrator password is incorrect");
+    if (raw.action === "assignServer") {
+      const instance = await assignServer(
+        user.id,
+        assignmentInput.parse({ ...raw.data, password: secret }),
+      );
+      return json({ ok: true, instanceId: instance.id });
+    }
+    if (raw.action === "emailTest") {
+      await limit(`email-test:${user.id}`, 3, 300);
+      const providerId = await sendEmail(
+        user.email,
+        "GlobalRDP email configuration test",
+        "Your email integration accepted this test. Registration codes use the same sender and API key.",
+        `test/${randomUUID()}`,
+        "ADMIN_TEST",
+        true,
+      );
+      return json({ ok: true, providerId });
+    }
+    if (raw.action === "userCreate") {
+      const data = registrationInput.parse(raw.data);
+      const existing = await db.user.findUnique({
+        where: { email: data.email },
+      });
+      if (existing)
+        throw new HttpError(409, "Account already exists; use Edit profile");
+      await registerAccount(data);
+      await db.audit.create({
+        data: {
+          actorId: user.id,
+          action: "CREATE_ACCOUNT",
+          targetId: data.email,
+        },
+      });
+      return json({ ok: true });
+    }
+    const data = z
+      .object({ userId: z.string(), checkout: checkoutInput })
+      .parse(raw.data);
+    if (data.checkout.method !== "wallet") {
+      const method = await db.paymentMethod.findUnique({
+        where: { id: data.checkout.method },
+      });
+      if (method?.provider !== "manual")
+        throw new HttpError(400, "Admin orders use wallet or manual payment");
+    }
+    const order = await checkout(data.userId, data.checkout);
+    await db.audit.create({
+      data: {
+        actorId: user.id,
+        action: "CREATE_CUSTOMER_ORDER",
+        targetId: order.id,
+      },
+    });
+    return json({ ok: true, orderId: order.id });
+  }
+  const s = input.parse(raw);
   if ("password" in s) {
     await limit(`admin-sensitive:${user.id}`, 8, 900);
     if (!(await bcrypt.compare(s.password, user.password)))
@@ -339,10 +503,11 @@ export const POST = route(async (req) => {
       } else await tx.paymentMethod.create({ data });
     }
     if (s.action === "key") {
+      if (s.name === "EMAIL_FROM") senderAddress.parse(s.value);
       await tx.systemKey.upsert({
         where: { name: s.name },
-        create: { name: s.name, ciphertext: encrypt(s.value) },
-        update: { ciphertext: encrypt(s.value) },
+        create: { name: s.name, ciphertext: encrypt(s.value.trim()) },
+        update: { ciphertext: encrypt(s.value.trim()) },
       });
     }
     if (s.action === "disable") {

@@ -37,7 +37,7 @@ export const POST = route(async (req) => {
   }
   const data = credentials.parse(input);
   await limit(`auth:${data.email}`, 8, 900);
-  if (action === "register") return json(await registerAccount(data), 202);
+  if (action === "register") return json(await registerAccount(input), 202);
   const user = await db.user.findUnique({ where: { email: data.email } });
   const valid = await bcrypt.compare(
     data.password,

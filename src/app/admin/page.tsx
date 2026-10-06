@@ -6,7 +6,7 @@ export default async function Admin() {
     await auth(true);
   } catch (e) {
     if (e instanceof HttpError)
-      redirect(e.status === 401 ? "/login" : "/dashboard");
+      redirect(e.status === 401 ? "/login?next=/admin" : "/dashboard");
     throw e;
   }
   return (

@@ -1,3 +1,4 @@
+import { systemMessage } from "./chat";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { atomic } from "./db";
@@ -90,6 +91,12 @@ export async function activatePaidOrder(
           secret: server.secret,
         },
       });
+      await systemMessage(
+        tx,
+        order.userId,
+        `Your ${item.name} server is ready. Open My instances to securely view your connection details.`,
+        `delivery:${instance.id}`,
+      );
       assigned = true;
       break;
     }
@@ -324,6 +331,31 @@ export async function fulfill(
         username: s.username,
         secret: encrypt(s.password),
       };
+    if (
+      await tx.instance.count({
+        where: {
+          id: { not: s.id },
+          ip: details.ip,
+          port: details.port,
+          status: { not: "TERMINATED" },
+        },
+      })
+    )
+      throw new HttpError(409, "Server address is already assigned");
+    if (
+      !("inventoryId" in s) &&
+      (await tx.inventoryServer.count({
+        where: {
+          ip: details.ip,
+          port: details.port,
+          state: { not: "RETIRED" },
+        },
+      }))
+    )
+      throw new HttpError(
+        409,
+        "This address exists in inventory. Select its inventory entry.",
+      );
     await tx.instance.update({
       where: { id: s.id },
       data: {
@@ -332,6 +364,12 @@ export async function fulfill(
         expiresAt: new Date(Date.now() + 30 * 86400000),
       },
     });
+    await systemMessage(
+      tx,
+      instance.userId,
+      `Your server is ready. Open My instances to securely view your connection details.`,
+      `delivery:${s.id}`,
+    );
     const remaining = await tx.orderItem.count({
       where: {
         orderId: instance.orderItem.orderId,

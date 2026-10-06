@@ -6,18 +6,16 @@ import { cancelUnpaid } from "@/lib/orders";
 import { checkoutPayment } from "@/lib/payments";
 export const GET = route(async () => {
   const { user } = await auth();
-  return json(
-    await db.order.findMany({
-      where: { userId: user.id },
-      include: {
-        items: {
-          include: { instance: { select: { id: true, status: true } } },
-        },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-    }),
-  );
+  const rows = await db.order.findMany({
+    where: { userId: user.id, deletedAt: null },
+    include: {
+      payment: { select: { id: true, status: true, gatewayStatus: true } },
+      items: { include: { instance: { select: { id: true, status: true } } } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+  return json(rows.map(({ notes, ...order }) => order));
 });
 export const POST = route(async (req) => {
   origin(req);
@@ -31,7 +29,7 @@ export const POST = route(async (req) => {
     return json({ ok: true });
   }
   const o = await db.order.findFirst({
-    where: { id: s.id, userId: user.id },
+    where: { id: s.id, userId: user.id, deletedAt: null },
     include: { payment: true },
   });
   if (!o) throw new HttpError(404, "Order not found");

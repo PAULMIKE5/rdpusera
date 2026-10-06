@@ -19,14 +19,29 @@ import {
 } from "lucide-react";
 import { z } from "zod";
 import type { Me, CartLine } from "./types";
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+  }
+}
 export async function api(path: string, data?: unknown) {
   const r = await fetch("/api/" + path, {
     method: data === undefined ? "GET" : "POST",
     headers: data === undefined ? {} : { "Content-Type": "application/json" },
     body: data === undefined ? undefined : JSON.stringify(data),
   });
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.error ?? "Request failed");
+  let j;
+  try {
+    j = await r.json();
+  } catch {
+    throw new Error(
+      `Server returned an unreadable response (HTTP ${r.status}). Please retry or contact support.`,
+    );
+  }
+  if (!r.ok) throw new ApiError(j.error ?? "Request failed", r.status);
   return j;
 }
 const savedCart = z
@@ -72,8 +87,12 @@ export function Workspace({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       setMe(await api("me"));
-    } catch {
-      setMe(null);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) setMe(null);
+      else
+        setNotice(
+          "Account details are temporarily unavailable. Your session has not been cleared.",
+        );
     }
   }, []);
   useEffect(() => {
@@ -238,6 +257,7 @@ export function DashboardNav() {
         ["/dashboard/instances", "My instances"],
         ["/dashboard/billing", "Billing"],
         ["/dashboard/settings", "Settings"],
+        ["/dashboard/support", "Support"],
         ...(me?.role === "ADMIN" ? [["/admin", "Admin"]] : []),
       ].map(([href, label]) => (
         <Link className={path === href ? "active" : ""} key={href} href={href}>

@@ -4,11 +4,12 @@ import {
   createHmac,
   timingSafeEqual,
 } from "node:crypto";
+import { countries } from "./countries";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { atomic, db } from "./db";
 import { HttpError, limit, required } from "./security";
-import { emailConfig, sendVerification } from "./email";
+import { sendVerification } from "./email";
 export const emailAddress = z
   .string()
   .trim()
@@ -26,6 +27,21 @@ export const credentials = z.object({
       "Password must be at most 72 bytes",
     ),
 });
+export const profileInput = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(2, "Enter your full name")
+    .max(80)
+    .refine((v) => !/[\x00-\x1f]/.test(v), "Invalid name"),
+  countryCode: z
+    .string()
+    .refine(
+      (v) => countries.some((c) => c.code === v),
+      "Select your country of residence",
+    ),
+});
+export const registrationInput = credentials.merge(profileInput);
 export function otpHash(id: string, code: string) {
   return createHmac("sha256", required("JWT_SECRET"))
     .update(`email-otp:${id}:${code}`)
@@ -60,9 +76,10 @@ async function deliver(email: string, c: ReturnType<typeof challenge>) {
     retryAfter: 60,
   };
 }
-export async function registerAccount(input: z.infer<typeof credentials>) {
-  const data = credentials.parse(input);
-  await emailConfig();
+export async function registerAccount(
+  input: z.infer<typeof registrationInput>,
+) {
+  const data = registrationInput.parse(input);
   await limit(`otp-send:${data.email}`, 1, 60);
   await limit(`otp-send-hour:${data.email}`, 5, 3600);
   const password = await bcrypt.hash(data.password, 12),
@@ -79,8 +96,18 @@ export async function registerAccount(input: z.infer<typeof credentials>) {
       throw new HttpError(409, "Unable to register. Try signing in instead.");
     // Re-registration can reclaim an unverified address; all older challenges are invalidated.
     user = user
-      ? await tx.user.update({ where: { id: user.id }, data: { password } })
-      : await tx.user.create({ data: { email: data.email, password } });
+      ? await tx.user.update({
+          where: { id: user.id },
+          data: { password, name: data.name, countryCode: data.countryCode },
+        })
+      : await tx.user.create({
+          data: {
+            email: data.email,
+            password,
+            name: data.name,
+            countryCode: data.countryCode,
+          },
+        });
     await tx.emailVerification.upsert({
       where: { userId: user.id },
       create: { ...c.data, userId: user.id },
@@ -147,7 +174,6 @@ export async function resendVerification(id: string) {
     row.user.deletedAt
   )
     throw new HttpError(400, "Start registration again to request a code.");
-  await emailConfig();
   await limit(`otp-send:${row.user.email}`, 1, 60);
   await limit(`otp-send-hour:${row.user.email}`, 5, 3600);
   const c = challenge();
@@ -179,7 +205,6 @@ export async function resumeVerification(email: string) {
       ),
     };
   // Login has already checked the password; only issue a fresh challenge if needed.
-  await emailConfig();
   await limit(`otp-send:${email}`, 1, 60);
   await limit(`otp-send-hour:${email}`, 5, 3600);
   const user = await db.user.findUniqueOrThrow({ where: { email } }),

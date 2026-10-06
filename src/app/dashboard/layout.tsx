@@ -9,7 +9,8 @@ export default async function Layout({
   try {
     await auth();
   } catch (e) {
-    if (e instanceof HttpError && e.status === 401) redirect("/login");
+    if (e instanceof HttpError && e.status === 401)
+      redirect("/login?next=/dashboard");
     throw e;
   }
   return (

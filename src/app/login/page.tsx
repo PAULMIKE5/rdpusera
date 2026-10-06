@@ -10,6 +10,7 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import { api, useWorkspace } from "@/components/workspace";
+import { countries } from "@/lib/countries";
 type Challenge = { challengeId: string; email: string; retryAfter: number };
 export default function Login() {
   const [register, setRegister] = useState(false),
@@ -60,7 +61,14 @@ export default function Login() {
   async function finish() {
     clearChallenge();
     await refresh();
-    router.push(cart.length ? "/cart" : "/dashboard");
+    const next = new URLSearchParams(window.location.search).get("next");
+    const allowed =
+      next &&
+      /^\/(dashboard(?:[/?]|$)|admin(?:[/?]|$)|payments\/return(?:[?]|$)|cart$)/.test(
+        next,
+      ) &&
+      !/[\\\r\n]/.test(next);
+    router.push(allowed ? next : cart.length ? "/cart" : "/dashboard");
     router.refresh();
   }
   return (
@@ -222,6 +230,38 @@ export default function Login() {
                   }
                 }}
               >
+                {register && (
+                  <>
+                    <label>
+                      Full name
+                      <input
+                        name="name"
+                        autoComplete="name"
+                        minLength={2}
+                        maxLength={80}
+                        required
+                      />
+                    </label>
+                    <label>
+                      Country of residence
+                      <select
+                        name="countryCode"
+                        autoComplete="country-name"
+                        defaultValue=""
+                        required
+                      >
+                        <option value="" disabled>
+                          Select your country
+                        </option>
+                        {countries.map((c) => (
+                          <option key={c.code} value={c.code}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
+                )}
                 <label>
                   Email address
                   <input

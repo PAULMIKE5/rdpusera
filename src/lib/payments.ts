@@ -15,12 +15,27 @@ export async function gatewayFetch(
     },
     signal: AbortSignal.timeout(15000),
   });
-  if (!response.ok)
+  if (!response.ok) {
+    console.error(
+      JSON.stringify({
+        event: "gateway_request_failed",
+        host: new URL(url).hostname,
+        httpStatus: response.status,
+      }),
+    );
     throw new HttpError(
       502,
       "Payment provider unavailable. Check your payment status before trying again.",
     );
-  return response.json();
+  }
+  try {
+    return await response.json();
+  } catch {
+    throw new HttpError(
+      502,
+      "Payment provider returned an unreadable response. Check payment status before retrying.",
+    );
+  }
 }
 export async function checkoutPayment(id: string) {
   const p = await db.payment.findUniqueOrThrow({
@@ -37,7 +52,7 @@ export async function checkoutPayment(id: string) {
       409,
       "Legacy payment requires administrator reconciliation",
     );
-  const app = required("APP_URL");
+  const app = new URL(required("APP_URL")).origin;
   const key = await systemKey(
     p.provider === "flutterwave"
       ? "FLUTTERWAVE_SECRET_KEY"
@@ -53,7 +68,7 @@ export async function checkoutPayment(id: string) {
       409,
       "Checkout is being prepared or needs administrator reconciliation. Do not pay twice.",
     );
-  const destination = `${app}${p.orderId ? "/dashboard/orders" : "/dashboard/billing"}`;
+  const destination = `${app}/payments/return?payment=${encodeURIComponent(p.id)}`;
   let providerId: string, url: string;
   if (p.provider === "flutterwave") {
     const r = await gatewayFetch(
