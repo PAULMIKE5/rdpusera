@@ -76,6 +76,16 @@ export default function Orders() {
               ))}
             </ul>
             <strong>{money(o.totalCents)}</strong>
+            {o.payment?.chargeCurrency === "NGN" && o.payment.chargeAmount && (
+              <p className="text-lime-200 mt-2">
+                Naira payment: ₦
+                {Number(o.payment.chargeAmount).toLocaleString("en-NG", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}{" "}
+                · Bank transfer, card or USSD
+              </p>
+            )}
             {o.status === "AWAITING_PAYMENT" && (
               <>
                 <p className="muted whitespace-pre-wrap my-4">
@@ -89,7 +99,9 @@ export default function Orders() {
                 )}
                 <div className="flex flex-wrap gap-3">
                   {o.payment &&
-                    ["flutterwave", "nowpayments"].includes(o.method) && (
+                    ["flutterwave", "flutterwave_ngn", "nowpayments"].includes(
+                      o.method,
+                    ) && (
                       <Link
                         className="secondary"
                         href={`/payments/return?payment=${o.payment.id}`}

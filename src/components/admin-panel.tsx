@@ -52,6 +52,9 @@ export type AdminData = {
     provider: string;
     status: string;
     providerId: string | null;
+    chargeCurrency: string;
+    chargeAmount: string | null;
+    exchangeRate: string | null;
     createdAt: string;
     version: number;
     user: { email: string };
@@ -240,7 +243,11 @@ export function AdminPanel() {
         label: "Provider (cannot change after creation)",
         value: m?.provider ?? "manual",
         options: [
-          { value: "flutterwave", label: "Flutterwave (fiat)" },
+          { value: "flutterwave", label: "Flutterwave · USD cards" },
+          {
+            value: "flutterwave_ngn",
+            label: "Flutterwave · NGN bank transfer, cards & USSD",
+          },
           { value: "nowpayments", label: "NOWPayments (crypto)" },
           ...(m && ["stripe", "crypto"].includes(m.provider)
             ? [{ value: m.provider, label: "Legacy (disabled)" }]
@@ -253,6 +260,12 @@ export function AdminPanel() {
         label: "Customer payment instructions (never put secret API keys here)",
         type: "textarea",
         value: m?.instructions,
+      },
+      {
+        name: "usdToNgn",
+        label: "NGN per $1 (required for Naira; ignored for other methods)",
+        value: m?.usdToNgn ?? "",
+        optional: true,
       },
       {
         name: "enabled",
@@ -629,7 +642,11 @@ export function AdminPanel() {
                   Configure online provider keys under System keys. For manual
                   payments, provide public bank or wallet instructions; verify
                   actual receipt before confirming an order. Existing orders
-                  retain their original instructions.
+                  retain their original instructions. Naira payments need your
+                  selling rate in NGN per $1. Existing payments keep their saved
+                  rate. Both Flutterwave options use the same keys and webhook.
+                  In Flutterwave, turn off “Enable Dashboard Payment Options” so
+                  checkout respects the selected currency’s payment methods.
                 </p>
                 <div className="grid md:grid-cols-2 gap-4">
                   <Editor

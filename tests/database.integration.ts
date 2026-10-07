@@ -999,3 +999,188 @@ test("crypto early callbacks retain IDs, return verification settles once and re
     await other.cleanup();
   }
 });
+
+test("separate Flutterwave currencies lock amounts, reject mismatch and settle order/funding once", async () => {
+  const { createFundingPayment } = await import("../src/lib/payments");
+  const { verifyFlutterwavePayment } =
+    await import("../src/lib/payment-verification");
+  const f = await fixture();
+  const ngn = await db.paymentMethod.create({
+    data: {
+      label: "Naira",
+      provider: "flutterwave_ngn",
+      enabled: true,
+      usdToNgn: "1500.123456",
+    },
+  });
+  const usd = await method("flutterwave");
+  const originalFetch = globalThis.fetch;
+  process.env.APP_URL = "https://example.invalid";
+  process.env.FLUTTERWAVE_SECRET_KEY = "test-key";
+  process.env.FLUTTERWAVE_WEBHOOK_SECRET = "test-secret";
+  try {
+    const o = await checkout(f.user.id, f.cart(ngn.id));
+    const p = await db.payment.findUniqueOrThrow({ where: { orderId: o.id } });
+    assert.equal(p.chargeCurrency, "NGN");
+    assert.equal(p.chargeAmount?.toFixed(2), "15001.23");
+    await db.paymentMethod.update({
+      where: { id: ngn.id },
+      data: { usdToNgn: "2000" },
+    });
+    let currency = "USD",
+      amount = "15001.23",
+      creations = 0;
+    globalThis.fetch = async (_url, init) => {
+      if (init?.method === "POST") {
+        creations++;
+        const body = JSON.parse(String(init.body));
+        assert.equal(body.currency, "NGN");
+        assert.equal(body.amount, "15001.23");
+        assert.equal(body.payment_options, "card, banktransfer, ussd");
+        return Response.json({
+          status: "success",
+          data: { link: "https://checkout.flutterwave.com/test-ngn" },
+        });
+      }
+      return Response.json({
+        status: "success",
+        data: {
+          id: 654321,
+          tx_ref: p.id,
+          status: "successful",
+          currency,
+          amount,
+        },
+      });
+    };
+    await checkoutPayment(p.id);
+    await checkoutPayment(p.id);
+    assert.equal(creations, 1);
+    await assert.rejects(verifyFlutterwavePayment("654321", p.id), /mismatch/);
+    currency = "NGN";
+    amount = "10";
+    await assert.rejects(verifyFlutterwavePayment("654321", p.id), /mismatch/);
+    amount = "15001.22";
+    await assert.rejects(verifyFlutterwavePayment("654321", p.id), /mismatch/);
+    amount = "15001.23";
+    await assert.rejects(
+      verifyFlutterwavePayment("654321", "wrong-payment"),
+      /mismatch/,
+    );
+    const callback = () =>
+      new Request("https://example.invalid/api/webhooks/flutterwave", {
+        method: "POST",
+        headers: { "verif-hash": "test-secret" },
+        body: JSON.stringify({
+          event: "charge.completed",
+          data: { id: 654321 },
+        }),
+      });
+    assert.equal((await webhook(callback())).status, 200);
+    assert.equal((await webhook(callback())).status, 200);
+    assert.equal(
+      (await db.order.findUniqueOrThrow({ where: { id: o.id } })).status,
+      "PENDING",
+    );
+    assert.equal(await db.instance.count({ where: { userId: f.user.id } }), 1);
+    assert.equal(
+      (await db.user.findUniqueOrThrow({ where: { id: f.user.id } })).wallet,
+      10000,
+    );
+
+    const input = {
+      cents: 1250,
+      provider: "flutterwave_ngn",
+      method: ngn.id,
+      requestKey: crypto.randomUUID(),
+    };
+    const funding = await createFundingPayment(f.user.id, input);
+    assert.equal(funding.chargeAmount?.toFixed(2), "25000.00");
+    await db.paymentMethod.update({
+      where: { id: ngn.id },
+      data: { usdToNgn: "2500" },
+    });
+    assert.equal(
+      (await createFundingPayment(f.user.id, input)).chargeAmount?.toFixed(2),
+      "25000.00",
+    );
+    await assert.rejects(
+      createFundingPayment(f.user.id, { ...input, cents: 1300 }),
+      /Idempotency/,
+    );
+    await assert.rejects(
+      createFundingPayment(f.user.id, { ...input, method: usd.id }),
+      /disabled/,
+    );
+    globalThis.fetch = async (_url, init) => {
+      if (init?.method === "POST") {
+        assert.equal(JSON.parse(String(init.body)).amount, "25000.00");
+        return Response.json({
+          status: "success",
+          data: { link: "https://checkout.flutterwave.com/fund" },
+        });
+      }
+      return Response.json({
+        status: "success",
+        data: {
+          id: 654322,
+          tx_ref: funding.id,
+          status: "successful",
+          currency: "NGN",
+          amount: "25000",
+        },
+      });
+    };
+    await checkoutPayment(funding.id);
+    await verifyFlutterwavePayment("654322", funding.id);
+    await verifyFlutterwavePayment("654322", funding.id);
+    assert.equal(
+      (await db.user.findUniqueOrThrow({ where: { id: f.user.id } })).wallet,
+      11250,
+    );
+    assert.equal(
+      await db.ledger.count({ where: { reference: `payment:${funding.id}` } }),
+      1,
+    );
+
+    const dollar = await createFundingPayment(f.user.id, {
+      cents: 1000,
+      provider: "flutterwave",
+      method: usd.id,
+      requestKey: crypto.randomUUID(),
+    });
+    globalThis.fetch = async (_url, init) => {
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body));
+        assert.equal(body.currency, "USD");
+        assert.equal(body.amount, "10.00");
+        assert.equal(body.payment_options, "card");
+        return Response.json({
+          status: "success",
+          data: { link: "https://checkout.flutterwave.com/usd" },
+        });
+      }
+      return Response.json({
+        status: "success",
+        data: {
+          id: 654323,
+          tx_ref: dollar.id,
+          status: "successful",
+          currency: "NGN",
+          amount: "10",
+        },
+      });
+    };
+    await checkoutPayment(dollar.id);
+    await assert.rejects(
+      verifyFlutterwavePayment("654323", dollar.id),
+      /mismatch/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    await f.cleanup();
+    await db.paymentMethod.deleteMany({
+      where: { id: { in: [ngn.id, usd.id] } },
+    });
+  }
+});

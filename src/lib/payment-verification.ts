@@ -1,3 +1,4 @@
+import { isFlutterwave } from "./payment-currency";
 import { db } from "./db";
 import { HttpError } from "./security";
 import { systemKey } from "./config";
@@ -82,11 +83,15 @@ export async function verifyFlutterwavePayment(
   });
   if (
     !p ||
-    p.provider !== "flutterwave" ||
+    !isFlutterwave(p.provider) ||
     (expectedPaymentId && p.id !== expectedPaymentId) ||
     String(v.id) !== id ||
-    v.currency !== "USD" ||
-    fiatCents(v.amount) !== p.cents ||
+    v.currency !== p.chargeCurrency ||
+    (p.provider === "flutterwave_ngn" &&
+      (!p.chargeAmount || p.chargeCurrency !== "NGN" || !p.exchangeRate)) ||
+    (p.provider === "flutterwave" && p.chargeCurrency !== "USD") ||
+    fiatCents(v.amount) !==
+      (p.chargeAmount ? fiatCents(p.chargeAmount.toFixed(2)) : p.cents) ||
     !p.checkoutStarted
   )
     throw new HttpError(400, "Payment amount, currency or reference mismatch");
@@ -100,7 +105,7 @@ export async function verifyFlutterwavePayment(
       },
     });
   if (v.status === "successful")
-    await credit(p.id, "flutterwave", p.cents, p.id, `flutterwave:${id}`);
+    await credit(p.id, p.provider, p.cents, p.id, `flutterwave:${id}`);
   return p.id;
 }
 export async function reconcilePayment(
@@ -117,7 +122,7 @@ export async function reconcilePayment(
     const id = providerPaymentId || p.gatewayPaymentId;
     if (id) {
       if (p.provider === "nowpayments") await verifyNowPayment(id, p.id);
-      else if (p.provider === "flutterwave")
+      else if (isFlutterwave(p.provider))
         await verifyFlutterwavePayment(id, p.id);
     }
   }

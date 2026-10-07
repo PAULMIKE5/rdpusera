@@ -1,3 +1,4 @@
+import { isFlutterwave, paymentQuote } from "./payment-currency";
 import { db } from "./db";
 import { HttpError, required } from "./security";
 import { systemKey } from "./config";
@@ -47,14 +48,19 @@ export async function checkoutPayment(id: string) {
     throw new HttpError(409, "Payment is not pending");
   if (p.provider === "manual") return { manual: true };
   if (p.checkoutUrl) return { url: p.checkoutUrl };
-  if (!["flutterwave", "nowpayments"].includes(p.provider))
+  if (!["flutterwave", "flutterwave_ngn", "nowpayments"].includes(p.provider))
     throw new HttpError(
       409,
       "Legacy payment requires administrator reconciliation",
     );
+  if (
+    p.provider === "flutterwave_ngn" &&
+    (!p.chargeAmount || p.chargeCurrency !== "NGN" || !p.exchangeRate)
+  )
+    throw new HttpError(409, "NGN payment quote missing; contact support");
   const app = new URL(required("APP_URL")).origin;
   const key = await systemKey(
-    p.provider === "flutterwave"
+    isFlutterwave(p.provider)
       ? "FLUTTERWAVE_SECRET_KEY"
       : "NOWPAYMENTS_API_KEY",
   );
@@ -70,7 +76,7 @@ export async function checkoutPayment(id: string) {
     );
   const destination = `${app}/payments/return?payment=${encodeURIComponent(p.id)}`;
   let providerId: string, url: string;
-  if (p.provider === "flutterwave") {
+  if (isFlutterwave(p.provider)) {
     const r = await gatewayFetch(
       "https://api.flutterwave.com/v3/payments",
       key,
@@ -78,8 +84,12 @@ export async function checkoutPayment(id: string) {
         method: "POST",
         body: JSON.stringify({
           tx_ref: p.id,
-          amount: (p.cents / 100).toFixed(2),
-          currency: "USD",
+          amount: p.chargeAmount?.toFixed(2) ?? (p.cents / 100).toFixed(2),
+          currency: p.chargeCurrency,
+          payment_options:
+            p.provider === "flutterwave_ngn"
+              ? "card, banktransfer, ussd"
+              : "card",
           redirect_url: destination,
           customer: { email: p.user.email, name: p.user.name || p.user.email },
           customizations: { title: "GlobalRDP Hub" },
@@ -120,4 +130,54 @@ export async function checkoutPayment(id: string) {
     data: { providerId, checkoutUrl: url },
   });
   return { url };
+}
+
+// Called only after authentication, input validation and the demo-mode guard.
+export async function createFundingPayment(
+  userId: string,
+  s: {
+    cents: number;
+    provider: string;
+    requestKey: string;
+    method?: string;
+  },
+) {
+  const method =
+    s.provider === "demo"
+      ? null
+      : await db.paymentMethod.findFirst({
+          where: {
+            ...(s.method ? { id: s.method } : {}),
+            provider: s.provider,
+            enabled: true,
+          },
+          orderBy: { id: "asc" },
+        });
+  if (s.provider !== "demo" && !method)
+    throw new HttpError(409, "Payment method disabled");
+  const existing = await db.payment.findUnique({
+    where: { userId_requestKey: { userId, requestKey: s.requestKey } },
+  });
+  const p =
+    existing ??
+    (await db.payment.upsert({
+      where: { userId_requestKey: { userId, requestKey: s.requestKey } },
+      create: {
+        userId,
+        cents: s.cents,
+        provider: s.provider,
+        requestKey: s.requestKey,
+        paymentMethodId: method?.id,
+        ...paymentQuote(s.provider, s.cents, method?.usdToNgn?.toString()),
+      },
+      update: {},
+    }));
+  if (
+    p.cents !== s.cents ||
+    p.provider !== s.provider ||
+    p.orderId ||
+    (s.method && p.paymentMethodId !== s.method)
+  )
+    throw new HttpError(409, "Idempotency key reused");
+  return p;
 }

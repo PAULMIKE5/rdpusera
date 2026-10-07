@@ -57,7 +57,13 @@ export type Order = {
   id: string;
   status: string;
   totalCents: number;
-  payment?: { id: string; status: string; gatewayStatus: string | null } | null;
+  payment?: {
+    id: string;
+    status: string;
+    gatewayStatus: string | null;
+    chargeCurrency: string;
+    chargeAmount: string | null;
+  } | null;
   method: string;
   paymentInstructions: string;
   createdAt: string;
@@ -80,5 +86,6 @@ export type Method = {
   label: string;
   provider: string;
   instructions: string;
+  usdToNgn?: string | null;
   enabled?: boolean;
 };

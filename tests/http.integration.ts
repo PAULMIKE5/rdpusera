@@ -132,6 +132,79 @@ test(
         ).status,
         403,
       );
+      const naira = {
+        action: "method",
+        id: "flutterwave-ngn",
+        label: "Naira",
+        provider: "flutterwave_ngn",
+        instructions: "",
+        enabled: true,
+        usdToNgn: "",
+      };
+      assert.equal(
+        (
+          await request("/api/admin", userCookie, {
+            ...naira,
+            usdToNgn: "1500",
+          })
+        ).status,
+        403,
+      );
+      assert.equal(
+        (await request("/api/admin", adminCookie, naira)).status,
+        400,
+      );
+      assert.equal(
+        (
+          await request("/api/admin", adminCookie, {
+            ...naira,
+            usdToNgn: "-1500",
+          })
+        ).status,
+        400,
+      );
+      assert.equal(
+        (
+          await request("/api/admin", adminCookie, {
+            ...naira,
+            usdToNgn: "1500.123456",
+          })
+        ).status,
+        200,
+      );
+      const methods = await (await request("/api/payment-methods")).json();
+      const publicNaira = methods.find(
+        (m: { provider: string }) => m.provider === "flutterwave_ngn",
+      );
+      assert.equal(publicNaira.usdToNgn, "1500.123456");
+      assert.ok(!JSON.stringify(methods).includes("SECRET"));
+      assert.equal(
+        (
+          await request("/api/funding", userCookie, {
+            cents: 100,
+            provider: "flutterwave_ngn",
+            method: "flutterwave-usd",
+            requestKey: crypto.randomUUID(),
+          })
+        ).status,
+        409,
+      );
+      assert.equal(
+        (
+          await request(
+            "/api/funding",
+            userCookie,
+            {
+              cents: 100,
+              provider: "flutterwave_ngn",
+              method: "flutterwave-ngn",
+              requestKey: crypto.randomUUID(),
+            },
+            "https://other.invalid",
+          )
+        ).status,
+        403,
+      );
       const balance = {
         action: "balance",
         id: customer.id,

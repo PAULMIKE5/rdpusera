@@ -1,4 +1,5 @@
 "use client";
+import { PaymentChoices, NairaPreview } from "@/components/payment-choice";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -256,23 +257,17 @@ export default function Cart() {
                   {loading ? "…" : money(total)}
                 </strong>
               </div>
-              <label>
-                Payment method
-                <select
-                  disabled={busy}
-                  value={method}
-                  onChange={(e) => setMethod(e.target.value)}
-                >
-                  <option value="wallet">
-                    Wallet · {money(me?.wallet ?? 0)}
-                  </option>
-                  {methods.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <PaymentChoices
+                methods={methods}
+                value={method}
+                onChange={setMethod}
+                disabled={busy}
+                walletLabel={`Wallet · ${money(me?.wallet ?? 0)}`}
+              />
+              <NairaPreview
+                method={methods.find((m) => m.id === method)}
+                cents={total}
+              />
               {!configured && (
                 <p className="text-amber-200 text-xs mt-4" role="status">
                   Choose a country for every server to continue.

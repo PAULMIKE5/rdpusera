@@ -9,7 +9,15 @@ export const GET = route(async () => {
   const rows = await db.order.findMany({
     where: { userId: user.id, deletedAt: null },
     include: {
-      payment: { select: { id: true, status: true, gatewayStatus: true } },
+      payment: {
+        select: {
+          id: true,
+          status: true,
+          gatewayStatus: true,
+          chargeCurrency: true,
+          chargeAmount: true,
+        },
+      },
       items: { include: { instance: { select: { id: true, status: true } } } },
     },
     orderBy: { createdAt: "desc" },

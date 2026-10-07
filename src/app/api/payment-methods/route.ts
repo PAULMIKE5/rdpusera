@@ -5,9 +5,17 @@ export const GET = route(async () =>
     await db.paymentMethod.findMany({
       where: {
         enabled: true,
-        provider: { in: ["flutterwave", "nowpayments", "manual"] },
+        provider: {
+          in: ["flutterwave", "flutterwave_ngn", "nowpayments", "manual"],
+        },
       },
-      select: { id: true, label: true, provider: true, instructions: true },
+      select: {
+        id: true,
+        label: true,
+        provider: true,
+        instructions: true,
+        usdToNgn: true,
+      },
       orderBy: { label: "asc" },
     }),
   ),

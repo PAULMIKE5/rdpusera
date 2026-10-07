@@ -109,6 +109,10 @@ model Payment {
   userId          String
   user            User     @relation(fields: [userId], references: [id])
   cents           Int
+  chargeCurrency  String   @default("USD")
+  chargeAmount    Decimal? @db.Decimal(18, 2)
+  exchangeRate    Decimal? @db.Decimal(18, 6)
+  paymentMethodId String?
   provider        String
   providerId      String?  @unique
   notes           String   @default("")
@@ -174,6 +178,7 @@ model PaymentMethod {
   label        String
   provider     String
   instructions String  @default("")
+  usdToNgn     Decimal? @db.Decimal(18, 6)
   enabled      Boolean @default(false)
 }
 

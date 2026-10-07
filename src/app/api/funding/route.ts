@@ -4,7 +4,7 @@ import { auth, origin, limit, HttpError, demo } from "@/lib/security";
 import { route, json, body } from "@/lib/http";
 import { db } from "@/lib/db";
 import { credit } from "@/lib/billing";
-import { checkoutPayment } from "@/lib/payments";
+import { createFundingPayment, checkoutPayment } from "@/lib/payments";
 export const POST = route(async (req) => {
   origin(req);
   const { user } = await auth();
@@ -12,25 +12,19 @@ export const POST = route(async (req) => {
   const s = z
     .object({
       cents: paymentCents,
-      provider: z.enum(["flutterwave", "nowpayments", "demo"]),
+      provider: z.enum([
+        "flutterwave",
+        "flutterwave_ngn",
+        "nowpayments",
+        "demo",
+      ]),
       requestKey: z.string().uuid(),
+      method: z.string().min(1).max(100).optional(),
     })
     .parse(await body(req));
-  if (s.provider === "demo") {
-    if (!demo()) throw new HttpError(403, "Demo funding disabled");
-  } else if (
-    !(await db.paymentMethod.findFirst({
-      where: { provider: s.provider, enabled: true },
-    }))
-  )
-    throw new HttpError(409, "Payment method disabled");
-  const p = await db.payment.upsert({
-    where: { userId_requestKey: { userId: user.id, requestKey: s.requestKey } },
-    create: { userId: user.id, ...s },
-    update: {},
-  });
-  if (p.cents !== s.cents || p.provider !== s.provider || p.orderId)
-    throw new HttpError(409, "Idempotency key reused");
+  if (s.provider === "demo" && !demo())
+    throw new HttpError(403, "Demo funding disabled");
+  const p = await createFundingPayment(user.id, s);
   if (p.status === "PAID") return json({ ok: true });
   if (s.provider === "demo") {
     await db.payment.update({
@@ -52,6 +46,8 @@ export const GET = route(async () => {
         id: true,
         cents: true,
         provider: true,
+        chargeCurrency: true,
+        chargeAmount: true,
         status: true,
         gatewayStatus: true,
         createdAt: true,

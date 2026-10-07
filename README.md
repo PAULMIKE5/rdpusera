@@ -1,5 +1,7 @@
 # GlobalRDP Hub
 
+Latest update: [Separate Flutterwave Naira and USD payments](docs/FLUTTERWAVE-CURRENCIES.md).
+
 **Latest Lightsail release:** follow [the admin, email, chat and payment upgrade guide](docs/ADMIN-OPERATIONS-UPGRADE.md). Apply its additive database migration before deploying the new container.
 
 Next.js marketplace with PostgreSQL/Prisma, authenticated customer and admin dashboards, public fixed-spec plans, cart checkout, Flutterwave fiat payments, NOWPayments cryptocurrency payments and encrypted RDP inventory.

@@ -1,4 +1,6 @@
 "use client";
+import { PaymentChoices, NairaPreview } from "@/components/payment-choice";
+import { paymentLabel } from "@/lib/payment-currency";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, useWorkspace } from "@/components/workspace";
@@ -14,11 +16,13 @@ export default function Billing() {
         provider: string;
         status: string;
         gatewayStatus: string | null;
+        chargeCurrency: string;
+        chargeAmount: string | null;
       }[]
     >([]),
     [methods, setMethods] = useState<Method[]>([]),
     [amount, setAmount] = useState("50.00"),
-    [provider, setProvider] = useState(""),
+    [methodId, setMethodId] = useState(""),
     [key, setKey] = useState(""),
     [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -26,7 +30,7 @@ export default function Billing() {
       .then((m: Method[]) => {
         const available = m.filter((v) => v.provider !== "manual");
         setMethods(available);
-        setProvider(available[0]?.provider ?? "");
+        setMethodId(available[0]?.id ?? "");
       })
       .catch((e) => setNotice(e.message));
   }, [setNotice]);
@@ -35,7 +39,7 @@ export default function Billing() {
       .then(setPayments)
       .catch((e) => setNotice(e.message));
   }, [setNotice]);
-  useEffect(() => setKey(crypto.randomUUID()), [amount, provider]);
+  useEffect(() => setKey(crypto.randomUUID()), [amount, methodId]);
   return (
     <>
       <h1 className="text-3xl mb-6">Wallet & billing</h1>
@@ -47,7 +51,11 @@ export default function Billing() {
           try {
             const r = await api("funding", {
               cents: dollarsToCents(amount),
-              provider,
+              provider:
+                methodId === "demo"
+                  ? "demo"
+                  : methods.find((m) => m.id === methodId)?.provider,
+              ...(methodId === "demo" ? {} : { method: methodId }),
               requestKey: key,
             });
             if (r.url) window.location.assign(r.url);
@@ -76,22 +84,24 @@ export default function Billing() {
             onChange={(e) => setAmount(e.target.value)}
           />
         </label>
-        <label>
-          Payment method
-          <select
-            value={provider}
-            onChange={(e) => setProvider(e.target.value)}
-          >
-            <option value="">Choose a payment method</option>
-            {methods.map((m) => (
-              <option key={m.id} value={m.provider}>
-                {m.label}
-              </option>
-            ))}
-            {me?.demo && <option value="demo">Demo credit (local only)</option>}
-          </select>
-        </label>
-        <button className="primary" disabled={busy || !provider || !key}>
+        <PaymentChoices
+          methods={methods}
+          value={methodId}
+          onChange={setMethodId}
+          disabled={busy}
+          demo={!!me?.demo}
+        />
+        <NairaPreview
+          method={methods.find((m) => m.id === methodId)}
+          cents={(() => {
+            try {
+              return dollarsToCents(amount);
+            } catch {
+              return 0;
+            }
+          })()}
+        />
+        <button className="primary" disabled={busy || !methodId || !key}>
           Add funds
         </button>
         {!methods.length && !me?.demo && (
@@ -110,14 +120,25 @@ export default function Billing() {
               className="flex flex-wrap justify-between gap-3 border-t border-white/10 py-4"
             >
               <div>
-                <strong>{money(p.cents)}</strong>
+                <strong>{money(p.cents)} wallet credit</strong>
+                {p.chargeCurrency === "NGN" && p.chargeAmount && (
+                  <p className="text-sm">
+                    Naira charge: ₦
+                    {Number(p.chargeAmount).toLocaleString("en-NG", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </p>
+                )}
                 <p className="muted text-sm">
-                  {p.provider} · {p.status}{" "}
+                  {paymentLabel(p.provider)} · {p.status}{" "}
                   {p.gatewayStatus ? `(${p.gatewayStatus})` : ""}
                 </p>
               </div>
               {p.status === "PENDING" &&
-                ["flutterwave", "nowpayments"].includes(p.provider) && (
+                ["flutterwave", "flutterwave_ngn", "nowpayments"].includes(
+                  p.provider,
+                ) && (
                   <Link
                     className="secondary"
                     href={`/payments/return?payment=${p.id}`}

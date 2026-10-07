@@ -1,3 +1,4 @@
+import { exchangeRateInput } from "@/lib/payment-currency";
 import { randomUUID } from "node:crypto";
 import {
   adminOperation,
@@ -259,12 +260,14 @@ const input = z.discriminatedUnion("action", [
     label: z.string().trim().min(2).max(80),
     provider: z.enum([
       "flutterwave",
+      "flutterwave_ngn",
       "nowpayments",
       "manual",
       "stripe",
       "crypto",
     ]),
     instructions: z.string().max(2000),
+    usdToNgn: z.string().trim().max(20).optional(),
     enabled: z.boolean(),
   }),
   z.object({
@@ -486,7 +489,17 @@ export const POST = route(async (req) => {
       });
     }
     if (s.action === "method") {
-      const { action, id, ...data } = s;
+      const { action, id, usdToNgn, ...fields } = s;
+      const rate =
+        fields.provider === "flutterwave_ngn" && usdToNgn
+          ? exchangeRateInput.parse(usdToNgn)
+          : null;
+      if (fields.provider === "flutterwave_ngn" && fields.enabled && !rate)
+        throw new HttpError(
+          400,
+          "Enter the NGN per $1 exchange rate before enabling Naira payments",
+        );
+      const data = { ...fields, usdToNgn: rate };
       if (["stripe", "crypto"].includes(data.provider) && data.enabled)
         throw new HttpError(
           400,

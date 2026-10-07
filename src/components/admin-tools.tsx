@@ -276,13 +276,25 @@ export function Transactions({
               <span className="badge ml-3">{t.status}</span>
             </div>
           </div>
+          {t.chargeCurrency === "NGN" && t.chargeAmount && (
+            <p className="text-sm text-lime-200 my-2">
+              NGN collected: ₦
+              {Number(t.chargeAmount).toLocaleString("en-NG", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}{" "}
+              · Rate: ₦{t.exchangeRate} per $1
+            </p>
+          )}
           {t.providerId && (
             <p className="muted text-xs mt-3 break-all">
               Provider reference: {t.providerId}
             </p>
           )}
           {t.status === "PENDING" &&
-            ["flutterwave", "nowpayments"].includes(t.provider) && (
+            ["flutterwave", "flutterwave_ngn", "nowpayments"].includes(
+              t.provider,
+            ) && (
               <details className="mt-4">
                 <summary className="cursor-pointer text-lime-200">
                   Verify payment with provider

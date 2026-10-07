@@ -1,3 +1,4 @@
+import { paymentQuote } from "./payment-currency";
 import { systemMessage } from "./chat";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
@@ -144,15 +145,19 @@ export async function checkout(
       throw new HttpError(403, "Account unavailable");
     const method =
       s.method === "wallet"
-        ? { provider: "wallet", instructions: "" }
+        ? { provider: "wallet", instructions: "", usdToNgn: null }
         : await tx.paymentMethod.findFirst({
             where: { id: s.method, enabled: true },
           });
     if (
       !method ||
-      !["wallet", "manual", "flutterwave", "nowpayments"].includes(
-        method.provider,
-      )
+      ![
+        "wallet",
+        "manual",
+        "flutterwave",
+        "flutterwave_ngn",
+        "nowpayments",
+      ].includes(method.provider)
     )
       throw new HttpError(409, "Payment method unavailable");
     const items: Prisma.OrderItemCreateWithoutOrderInput[] = [];
@@ -228,6 +233,12 @@ export async function checkout(
           userId,
           orderId: order.id,
           cents: totalCents,
+          ...paymentQuote(
+            method.provider,
+            totalCents,
+            method.usdToNgn?.toString(),
+          ),
+          paymentMethodId: s.method,
           provider: method.provider,
           requestKey: `checkout:${order.id}`,
         },
